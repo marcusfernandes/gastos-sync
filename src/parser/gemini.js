@@ -15,7 +15,8 @@ async function withRetry(fn, tries = 3) {
       return await fn();
     } catch (err) {
       const status = err?.status ?? err?.code;
-      const retryable = status === 429 || (status >= 500 && status < 600);
+      const cotaDiaria = /per day/i.test(err?.message || '');
+      const retryable = (status === 429 && !cotaDiaria) || (status >= 500 && status < 600);
       if (!retryable || attempt >= tries) throw err;
       await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
     }

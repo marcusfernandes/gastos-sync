@@ -5,9 +5,9 @@ import { normalizeTransacao } from '../src/parser/normalize.js';
 import { createSupabaseStorage } from '../src/storage/supabase.js';
 
 const emails = [
-  { id: 'a', subject: 'Compra aprovada', date: '2026-11-05T12:00:00Z', body: '...' },
-  { id: 'b', subject: 'Compra aprovada (reenvio)', date: '2026-11-05T12:05:00Z', body: '...' },
-  { id: 'c', subject: 'Erro', date: '2026-11-05T12:10:00Z', body: '...' },
+  { id: 'a', subject: 'Compra aprovada', date: '2026-11-05T12:00:00Z', body: 'Valor: R$ 42,90' },
+  { id: 'b', subject: 'Compra aprovada (reenvio)', date: '2026-11-05T12:05:00Z', body: 'Valor: R$ 42,90' },
+  { id: 'c', subject: 'Erro', date: '2026-11-05T12:10:00Z', body: 'Valor: R$ 42,90' },
 ];
 const raw = { data: '2026-11-05', valor: 50, estabelecimento: 'Uber', conta_ou_cartao: 'Nubank', categoria: 'Transporte', tipo: 'compra' };
 
@@ -64,4 +64,36 @@ test('dry-run não salva nem marca', async () => {
   assert.equal(r.transacoes.length, 1);
   assert.equal(saved, false);
   assert.equal(marked, false);
+});
+
+test('e-mails sem valores em R$ não vão ao Gemini e são marcados como processados', async () => {
+  const chamados = [];
+  const marcados = [];
+  const r = await runIngestion({
+    fetchEmails: async () => [
+      { id: 'promo', subject: 'Venda pelo celular!', body: 'Conheça nossas ofertas' },
+      { id: 'compra', subject: 'Compra aprovada', body: 'Compra de R$ 10,00 na PADARIA' },
+    ],
+    parse: async (e) => { chamados.push(e.id); return []; },
+    storage: { saveTransacoes: async () => ({ inserted: [], skipped: 0 }) },
+    markProcessed: async (ids) => marcados.push(...ids),
+    log: () => {},
+  });
+  assert.deepEqual(chamados, ['compra']);
+  assert.deepEqual(marcados.sort(), ['compra', 'promo']);
+  assert.equal(r.falhas.length, 0);
+});
+
+test('para de chamar o Gemini quando a cota diária acaba', async () => {
+  let chamadas = 0;
+  const emails = Array.from({ length: 10 }, (_, i) => ({ id: `m${i}`, subject: 'Compra', body: 'R$ 5,00' }));
+  const r = await runIngestion({
+    fetchEmails: async () => emails,
+    parse: async () => { chamadas++; throw Object.assign(new Error('{"error":{"message":"You exceeded your current quota"}}'), { status: 429 }); },
+    storage: { saveTransacoes: async () => ({ inserted: [], skipped: 0 }) },
+    markProcessed: async () => {},
+    log: () => {},
+  });
+  assert.equal(chamadas, 4);
+  assert.equal(r.falhas[0].erro, 'You exceeded your current quota');
 });

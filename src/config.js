@@ -2,6 +2,7 @@ const DEFAULT_GMAIL_QUERY = [
   'from:(nubank.com.br OR itau.com.br OR bb.com.br OR bancointer.com.br OR inter.co',
   'OR c6bank.com.br OR bradesco.com.br OR santander.com.br OR caixa.gov.br',
   'OR mercadopago.com OR picpay.com OR xpi.com.br OR btgpactual.com)',
+  '-category:promotions -category:social',
 ].join(' ');
 
 export const CATEGORIAS = [

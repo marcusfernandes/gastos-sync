@@ -10,6 +10,22 @@ import { parseEmail } from './parser/gemini.js';
 import { createStorage } from './storage/index.js';
 
 const CONCORRENCIA = 4;
+const VALOR_EM_REAIS = /R\$\s?\d|\d{1,3}(\.\d{3})*,\d{2}\b/;
+
+export function pareceTransacao(email) {
+  return Boolean(email.anexos?.length) || VALOR_EM_REAIS.test(`${email.subject}\n${email.body}`);
+}
+
+function resumirErro(err) {
+  const msg = err?.message || String(err);
+  try {
+    return JSON.parse(msg).error?.message?.split('\n')[0] || msg;
+  } catch {
+    return msg.slice(0, 300);
+  }
+}
+
+const cotaEsgotada = (err) => (err?.status ?? err?.code) === 429 && /quota|RESOURCE_EXHAUSTED/i.test(err?.message || '');
 
 const fmt = (t) =>
   `${t.data}  R$ ${t.valor.toFixed(2).padStart(10)}  ${t.tipo.padEnd(12)} ${t.estabelecimento} [${t.conta_ou_cartao} / ${t.categoria}]`;
@@ -21,9 +37,21 @@ export async function runIngestion({ fetchEmails, parse, storage, markProcessed,
   const transacoes = [];
   const processados = [];
   const falhas = [];
-  for (let i = 0; i < emails.length; i += CONCORRENCIA) {
-    const lote = emails.slice(i, i + CONCORRENCIA);
+  const candidatos = [];
+  for (const email of emails) {
+    if (pareceTransacao(email)) candidatos.push(email);
+    else {
+      log(`- "${email.subject}" -> ignorado (sem valores em R$)`);
+      processados.push(email.id);
+    }
+  }
+
+  let interrompido = false;
+  let tentados = 0;
+  for (let i = 0; i < candidatos.length && !interrompido; i += CONCORRENCIA) {
+    const lote = candidatos.slice(i, i + CONCORRENCIA);
     const resultados = await Promise.allSettled(lote.map((email) => parse(email)));
+    tentados += lote.length;
     resultados.forEach((r, j) => {
       const email = lote[j];
       if (r.status === 'fulfilled') {
@@ -31,10 +59,14 @@ export async function runIngestion({ fetchEmails, parse, storage, markProcessed,
         transacoes.push(...r.value);
         processados.push(email.id);
       } else {
-        falhas.push({ id: email.id, subject: email.subject, erro: r.reason?.message });
-        log(`! Falha ao processar "${email.subject}": ${r.reason?.message}`);
+        if (cotaEsgotada(r.reason)) interrompido = true;
+        falhas.push({ id: email.id, subject: email.subject, erro: resumirErro(r.reason) });
+        log(`! Falha ao processar "${email.subject}": ${resumirErro(r.reason)}`);
       }
     });
+  }
+  if (interrompido) {
+    log(`Cota do Gemini esgotada: ${candidatos.length - tentados} e-mail(s) não enviados, mais os que falharam, ficaram para a próxima execução. Ative o billing em https://aistudio.google.com/apikey.`);
   }
 
   if (dryRun) {
