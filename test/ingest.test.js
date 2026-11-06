@@ -97,3 +97,12 @@ test('para de chamar o Gemini quando a cota diária acaba', async () => {
   assert.equal(chamadas, 4);
   assert.equal(r.falhas[0].erro, 'You exceeded your current quota');
 });
+
+test('lembretes da mesma fatura geram a mesma chave de duplicidade', () => {
+  const base = { valor: 459.49, estabelecimento: 'Fatura Mercado Pago', conta_ou_cartao: 'Mercado Pago', categoria: 'Contas e Serviços', tipo: 'fatura', vencimento: '2026-10-19' };
+  const a = normalizeTransacao({ ...base, data: '2026-10-13' }, { id: '1' });
+  const b = normalizeTransacao({ ...base, data: '2026-10-19', estabelecimento: 'Fatura cartão Mercado Pago' }, { id: '2' });
+  const c = normalizeTransacao({ ...base, data: '2026-11-13', vencimento: '2026-11-19' }, { id: '3' });
+  assert.equal(a.dedupe_key, b.dedupe_key);
+  assert.notEqual(a.dedupe_key, c.dedupe_key);
+});

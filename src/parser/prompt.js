@@ -44,6 +44,7 @@ Regras:
 - E-mails encaminhados ("Forwarded message", "Mensagem encaminhada", "Fwd:"): use o remetente e o conteúdo da mensagem original.
 - PDF de fatura de cartão anexado: extraia CADA lançamento da fatura como "compra" (data da compra, valor, estabelecimento) e, além deles, uma linha "fatura" com o valor total e o vencimento. Ignore pagamentos da fatura anterior, créditos, estornos e o resumo/limites. Para compras parceladas use o valor da parcela e acrescente "(parcela X/Y)" ao estabelecimento.
 - PDF de extrato ou comprovante: extraia cada movimentação com o "tipo" adequado.
+- Confirmação de pagamento de fatura ("Você pagou a fatura", "débito automático realizado") NÃO é gasto novo: não extraia nada, pois a fatura já foi registrada.
 - Não invente dados.
 
 E-mail:

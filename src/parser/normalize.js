@@ -28,8 +28,13 @@ export function normalizarTexto(s) {
     .trim();
 }
 
-export function dedupeKey({ data, valor, estabelecimento }) {
-  const base = `${data}|${valor.toFixed(2)}|${normalizarTexto(estabelecimento)}`;
+// Faturas chegam repetidas em vários lembretes ("fechou", "vence amanhã", "venceu"):
+// uma por cartão, valor e mês de vencimento.
+export function dedupeKey({ data, valor, estabelecimento, tipo, vencimento, conta_ou_cartao }) {
+  const base =
+    tipo === 'fatura'
+      ? `fatura|${normalizarTexto(conta_ou_cartao)}|${valor.toFixed(2)}|${(vencimento || data).slice(0, 7)}`
+      : `${data}|${valor.toFixed(2)}|${normalizarTexto(estabelecimento)}`;
   return createHash('sha256').update(base).digest('hex');
 }
 
