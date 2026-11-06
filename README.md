@@ -38,6 +38,7 @@ gastos-sync/
 │       └── cli.js                # `npm run resumo`
 ├── supabase/
 │   ├── migrations/001_init.sql   # tabelas transacoes e planejamento
+│   ├── migrations/002_parcelas_categorias.sql  # parcelas, categorias, regras, responsável
 │   └── seed.example.sql          # exemplo de renda, aluguel e custos de mudança
 └── test/                         # node:test (sem dependências externas)
 ```
@@ -68,7 +69,7 @@ Escopo usado: `gmail.modify`, necessário apenas para aplicar o rótulo `gastos-
 Crie uma chave em https://aistudio.google.com/apikey e defina `GEMINI_API_KEY`. O modelo padrão é `gemini-3.1-flash-lite` com raciocínio mínimo (`GEMINI_THINKING=minimal`), o mais barato que extraiu 100% de uma fatura de teste com 34 lançamentos (~US$ 0,005 por fatura, ~US$ 0,0003 por e-mail de notificação). Se ele estiver indisponível, o app usa `GEMINI_MODEL_FALLBACK` (padrão `gemini-3.5-flash-lite`). Ambos configuráveis via env.
 
 ### 3a. Supabase (padrão)
-1. Crie um projeto e rode `supabase/migrations/001_init.sql` no SQL Editor.
+1. Crie um projeto e rode `supabase/migrations/001_init.sql` e depois `002_parcelas_categorias.sql` no SQL Editor.
 2. Ajuste e rode `supabase/seed.example.sql` para cadastrar renda, despesas fixas e custos da mudança.
 3. Defina `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY` (Project Settings > API). O RLS fica ativo sem políticas, então só a service role acessa os dados.
 
@@ -85,7 +86,7 @@ Crie uma chave em https://aistudio.google.com/apikey e defina `GEMINI_API_KEY`. 
 
 ## Deploy grátis (Render + Supabase + GitHub Actions)
 
-1. Supabase: crie o projeto (região **East US / N. Virginia**, perto do Render) e rode `supabase/migrations/001_init.sql`.
+1. Supabase: crie o projeto (região **East US / N. Virginia**, perto do Render) e rode as migrations de `supabase/migrations/` em ordem.
 2. Render: *New > Blueprint*, escolha este repositório (usa o `render.yaml`) e preencha `PAINEL_SENHA`, `GEMINI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET`.
    O plano free dorme após 15 min sem acesso (o primeiro acesso leva cerca de 50s).
 3. Adicione `https://<seu-app>.onrender.com/oauth2callback` ao OAuth client do Google, abra o painel (usuário qualquer + `PAINEL_SENHA`) e clique em **Conectar Gmail**.

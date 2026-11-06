@@ -38,25 +38,57 @@ export function dedupeKey({ data, valor, estabelecimento, tipo, vencimento, cont
   return createHash('sha256').update(base).digest('hex');
 }
 
-export function normalizeTransacao(raw, email) {
+const PARCELA_RE = /\(?\s*parcela\s*(\d+)\s*\/\s*(\d+)\s*\)?/i;
+
+// Estabelecimento sem o sufixo de parcela, normalizado: identifica a mesma loja/compra entre faturas.
+export function chaveEstabelecimento(estabelecimento) {
+  return normalizarTexto(String(estabelecimento || '').replace(PARCELA_RE, ''));
+}
+
+function parcelas(raw, estabelecimento) {
+  let atual = Number.parseInt(raw.parcela_atual, 10);
+  let total = Number.parseInt(raw.parcelas_total, 10);
+  const m = estabelecimento.match(PARCELA_RE);
+  if (!(total > 1) && m) [atual, total] = [Number(m[1]), Number(m[2])];
+  if (!(total > 1) || !(atual >= 1) || atual > total) return { estabelecimento, parcela_atual: null, parcelas_total: null };
+  const base = estabelecimento.replace(PARCELA_RE, '').trim().replace(/[\s\-–:,]+$/, '');
+  return { estabelecimento: `${base} (parcela ${atual}/${total})`, parcela_atual: atual, parcelas_total: total };
+}
+
+export function normalizeTransacao(raw, email, categorias = CATEGORIAS) {
   const valor = Math.round(parseValor(raw.valor) * 100) / 100;
   const data = parseData(raw.data, email?.date);
-  const estabelecimento = String(raw.estabelecimento || '').trim();
-  if (!Number.isFinite(valor) || valor <= 0 || !data || !estabelecimento) return null;
+  if (!Number.isFinite(valor) || valor <= 0 || !data || !String(raw.estabelecimento || '').trim()) return null;
 
   const tipo = TIPOS.includes(raw.tipo) ? raw.tipo : 'outro';
-  const categoria = CATEGORIAS.includes(raw.categoria) ? raw.categoria : 'Outros';
+  const categoria = categorias.includes(raw.categoria) ? raw.categoria : 'Outros';
+  const p = tipo === 'compra' ? parcelas(raw, String(raw.estabelecimento).trim()) : { estabelecimento: String(raw.estabelecimento).trim(), parcela_atual: null, parcelas_total: null };
   const t = {
     data,
     valor,
-    estabelecimento,
+    estabelecimento: p.estabelecimento,
     conta_ou_cartao: String(raw.conta_ou_cartao || 'Desconhecido').trim(),
     categoria,
     tipo,
-    vencimento: tipo === 'fatura' ? parseData(raw.vencimento, null) : null,
+    vencimento: tipo === 'fatura' || tipo === 'compra' ? parseData(raw.vencimento, null) : null,
+    parcela_atual: p.parcela_atual,
+    parcelas_total: p.parcelas_total,
     origem_email_id: email?.id ?? null,
     origem_assunto: email?.subject ?? null,
   };
   t.dedupe_key = dedupeKey(t);
   return t;
+}
+
+// Compras lidas de uma fatura herdam o vencimento dela (mês em que a parcela é cobrada);
+// regras salvas pelo usuário têm prioridade sobre a categoria sugerida pela IA.
+export function posProcessar(transacoes, regras = new Map()) {
+  const fatura = transacoes.find((t) => t.tipo === 'fatura' && t.vencimento);
+  return transacoes.map((t) => {
+    const out = { ...t };
+    if (out.tipo === 'compra' && !out.vencimento && fatura) out.vencimento = fatura.vencimento;
+    const regra = regras.get(chaveEstabelecimento(out.estabelecimento));
+    if (regra) out.categoria = regra;
+    return out;
+  });
 }

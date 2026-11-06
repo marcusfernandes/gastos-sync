@@ -2,6 +2,8 @@ import { createClient } from '@supabase/supabase-js';
 import { config } from '../config.js';
 import { TRANSACAO_COLUNAS, uniqueByKey } from './index.js';
 
+const COLUNAS = [...TRANSACAO_COLUNAS, 'parcela_atual', 'parcelas_total'];
+
 export function createSupabaseStorage(client) {
   const db =
     client ??
@@ -12,7 +14,7 @@ export function createSupabaseStorage(client) {
   return {
     async saveTransacoes(rows) {
       const unique = uniqueByKey(rows).map((r) =>
-        Object.fromEntries(TRANSACAO_COLUNAS.map((c) => [c, r[c] ?? null])),
+        Object.fromEntries(COLUNAS.map((c) => [c, r[c] ?? null])),
       );
       if (!unique.length) return { inserted: [], skipped: rows.length };
       const { data, error } = await db
@@ -40,6 +42,12 @@ export function createSupabaseStorage(client) {
       if (error) throw new Error(`Supabase: ${error.message}`);
     },
 
+    async updateTransacoes(ids, patch) {
+      if (!ids.length) return;
+      const { error } = await db.from('transacoes').update(patch).in('id', ids);
+      if (error) throw new Error(`Supabase: ${error.message}`);
+    },
+
     async listPlanejamento() {
       const { data, error } = await db.from('planejamento').select('*').order('inicio');
       if (error) throw new Error(`Supabase: ${error.message}`);
@@ -50,6 +58,45 @@ export function createSupabaseStorage(client) {
       const { data, error } = await db.from('planejamento').insert(item).select().single();
       if (error) throw new Error(`Supabase: ${error.message}`);
       return { ...data, valor: Number(data.valor) };
+    },
+
+    async updatePlanejamento(id, patch) {
+      const { data, error } = await db.from('planejamento').update(patch).eq('id', id).select().single();
+      if (error) throw new Error(`Supabase: ${error.message}`);
+      return { ...data, valor: Number(data.valor) };
+    },
+
+    async listCategorias() {
+      const { data, error } = await db.from('categorias').select('nome').order('nome');
+      if (error) throw new Error(`Supabase: ${error.message}`);
+      return data.map((c) => c.nome);
+    },
+
+    async addCategoria(nome) {
+      const { error } = await db.from('categorias').upsert({ nome }, { onConflict: 'nome', ignoreDuplicates: true });
+      if (error) throw new Error(`Supabase: ${error.message}`);
+    },
+
+    // As FKs com "on update cascade" / "on delete set default" propagam para transações e planejamento.
+    async renameCategoria(nome, novo) {
+      const { error } = await db.from('categorias').update({ nome: novo }).eq('nome', nome);
+      if (error) throw new Error(`Supabase: ${error.message}`);
+    },
+
+    async deleteCategoria(nome) {
+      const { error } = await db.from('categorias').delete().eq('nome', nome);
+      if (error) throw new Error(`Supabase: ${error.message}`);
+    },
+
+    async listRegras() {
+      const { data, error } = await db.from('regras_categoria').select('padrao, categoria');
+      if (error) throw new Error(`Supabase: ${error.message}`);
+      return new Map(data.map((r) => [r.padrao, r.categoria]));
+    },
+
+    async saveRegra(padrao, categoria) {
+      const { error } = await db.from('regras_categoria').upsert({ padrao, categoria });
+      if (error) throw new Error(`Supabase: ${error.message}`);
     },
 
     async deletePlanejamento(id) {

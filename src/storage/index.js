@@ -1,4 +1,4 @@
-import { config } from '../config.js';
+import { CATEGORIAS, config } from '../config.js';
 
 export const TRANSACAO_COLUNAS = [
   'data',
@@ -25,4 +25,13 @@ export async function createStorage(backend = config.storageBackend) {
   if (backend === 'sheets') return (await import('./sheets.js')).createSheetsStorage();
   if (backend === 'memory') return (await import('./memory.js')).createMemoryStorage();
   throw new Error(`STORAGE_BACKEND inválido: ${backend} (use "supabase", "sheets" ou "memory")`);
+}
+
+// Categorias e regras do usuário para o parser; cai nas padrão se o backend não suportar.
+export async function contextoParser(storage) {
+  const [categorias, regras] = await Promise.all([
+    storage.listCategorias?.().catch(() => null),
+    storage.listRegras?.().catch(() => null),
+  ]);
+  return { categorias: categorias?.length ? categorias : CATEGORIAS, regras: regras ?? new Map() };
 }

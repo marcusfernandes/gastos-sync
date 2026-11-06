@@ -16,6 +16,44 @@ export function planejadoNoMes(item, mes) {
   return inicio <= mes && (!item.fim || mesDe(item.fim) >= mes);
 }
 
+const parcelado = (t) => t.tipo === 'compra' && t.parcelas_total > 1;
+
+// Mês em que a parcela foi cobrada: vencimento da fatura ou, sem ele, o mês seguinte à compra.
+const mesCobranca = (t) => (t.vencimento ? mesDe(t.vencimento) : addMeses(mesDe(t.data), 1));
+
+// Uma linha por compra parcelada (a parcela mais recente conhecida), com o mês da última parcela.
+export function parcelamentos(transacoes) {
+  const ultimas = new Map();
+  for (const t of transacoes.filter(parcelado)) {
+    const base = t.estabelecimento.replace(/\s*\(parcela\s*\d+\s*\/\s*\d+\)\s*/i, '').trim().replace(/[\s\-–:,]+$/, '');
+    const chave = [t.conta_ou_cartao, base.toLowerCase(), t.valor.toFixed(2), t.parcelas_total].join('|');
+    const atual = ultimas.get(chave);
+    if (!atual || t.parcela_atual > atual.parcela_atual) ultimas.set(chave, { ...t, base });
+  }
+  return [...ultimas.values()]
+    .map((t) => {
+      const restantes = t.parcelas_total - t.parcela_atual;
+      const cobrada = mesCobranca(t);
+      return {
+        estabelecimento: t.base,
+        conta_ou_cartao: t.conta_ou_cartao,
+        categoria: t.categoria,
+        valor_parcela: t.valor,
+        parcela_atual: t.parcela_atual,
+        parcelas_total: t.parcelas_total,
+        mes_cobranca: cobrada,
+        mes_fim: addMeses(cobrada, restantes),
+        restante: round(t.valor * restantes),
+      };
+    })
+    .sort((a, b) => (a.mes_fim < b.mes_fim ? -1 : a.mes_fim > b.mes_fim ? 1 : b.valor_parcela - a.valor_parcela));
+}
+
+// Usado só para meses futuros: inclui o mês da parcela mais recente caso ele ainda não tenha chegado.
+export function parcelasNoMes(lista, mes) {
+  return lista.filter((p) => p.mes_cobranca <= mes && mes <= p.mes_fim);
+}
+
 function porCategoria(items) {
   const out = {};
   for (const i of items) out[i.categoria] = round((out[i.categoria] || 0) + i.valor);
@@ -65,7 +103,7 @@ export function mediaVariavel(transacoes, planejamento, mesAtual, nMeses) {
   );
   const meses = Array.from({ length: nMeses }, (_, i) => addMeses(mesAtual, -(i + 1)));
   const variaveis = transacoes.filter(
-    (t) => GASTO_TIPOS.has(t.tipo) && !categoriasFixas.has(t.categoria) && meses.includes(mesDe(t.data)),
+    (t) => GASTO_TIPOS.has(t.tipo) && !parcelado(t) && !categoriasFixas.has(t.categoria) && meses.includes(mesDe(t.data)),
   );
   const mesesComDados = new Set(variaveis.map((t) => mesDe(t.data))).size;
   return mesesComDados ? round(sum(variaveis) / mesesComDados) : 0;
@@ -73,6 +111,7 @@ export function mediaVariavel(transacoes, planejamento, mesAtual, nMeses) {
 
 export function projecao(transacoes, planejamento, { mesAtual, meses = 6, saldoInicial = 0, mesesHistorico = 3 }) {
   const variavel = mediaVariavel(transacoes, planejamento, mesAtual, mesesHistorico);
+  const abertos = parcelamentos(transacoes);
   let saldo = saldoInicial;
   const linhas = [];
   for (let i = 1; i <= meses; i++) {
@@ -81,13 +120,15 @@ export function projecao(transacoes, planejamento, { mesAtual, meses = 6, saldoI
     const entradas = sum(plan.filter((p) => p.direcao === 'entrada'));
     const fixos = sum(plan.filter((p) => p.direcao === 'saida' && p.recorrente));
     const pontuais = plan.filter((p) => p.direcao === 'saida' && !p.recorrente);
-    const saidas = round(fixos + sum(pontuais) + variavel);
+    const parcelas = round(parcelasNoMes(abertos, mes).reduce((acc, p) => acc + p.valor_parcela, 0));
+    const saidas = round(fixos + sum(pontuais) + variavel + parcelas);
     saldo = round(saldo + entradas - saidas);
     linhas.push({
       mes,
       entradas,
       gastos_fixos: fixos,
       gastos_variaveis_estimados: variavel,
+      parcelas,
       gastos_pontuais: sum(pontuais),
       pontuais: pontuais.map((p) => ({ descricao: p.descricao, valor: p.valor })),
       resultado_mes: round(entradas - saidas),
@@ -99,6 +140,7 @@ export function projecao(transacoes, planejamento, { mesAtual, meses = 6, saldoI
     mes_base: mesAtual,
     saldo_inicial: saldoInicial,
     media_variavel_mensal: variavel,
+    parcelamentos: abertos.filter((p) => p.mes_fim > mesAtual),
     meses: linhas,
     menor_saldo: menor ? { mes: menor.mes, valor: menor.saldo_projetado } : null,
     alerta: menor && menor.saldo_projetado < 0 ? `Saldo fica negativo em ${menor.mes}` : null,

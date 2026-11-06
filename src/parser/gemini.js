@@ -1,7 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
-import { config } from '../config.js';
-import { buildPrompt, transacoesSchema } from './prompt.js';
-import { normalizeTransacao } from './normalize.js';
+import { CATEGORIAS, config } from '../config.js';
+import { buildPrompt, schemaTransacoes } from './prompt.js';
+import { normalizeTransacao, posProcessar } from './normalize.js';
 
 let client;
 function getClient() {
@@ -25,7 +25,7 @@ async function withRetry(fn, tries = 3) {
 
 const indisponivel = (err) => [500, 503, 404].includes(err?.status ?? err?.code);
 
-export async function parseEmail(email, ai = getClient()) {
+export async function parseEmail(email, ai = getClient(), { categorias = CATEGORIAS, regras } = {}) {
   const { model, fallbackModel, thinking } = config.gemini;
   const thinkingConfig = thinking === 'off' ? undefined : { thinkingLevel: thinking };
   const gerar = (modelo) =>
@@ -35,7 +35,7 @@ export async function parseEmail(email, ai = getClient()) {
         {
           role: 'user',
           parts: [
-            { text: buildPrompt(email) },
+            { text: buildPrompt(email, categorias) },
             ...(email.anexos || []).map((a) => ({ inlineData: { mimeType: a.mimeType, data: a.data } })),
           ],
         },
@@ -43,7 +43,7 @@ export async function parseEmail(email, ai = getClient()) {
       config: {
         temperature: 0,
         responseMimeType: 'application/json',
-        responseJsonSchema: transacoesSchema,
+        responseJsonSchema: schemaTransacoes(categorias),
         ...(thinkingConfig && { thinkingConfig }),
       },
     });
@@ -55,5 +55,6 @@ export async function parseEmail(email, ai = getClient()) {
     response = await withRetry(() => gerar(fallbackModel));
   }
   const parsed = JSON.parse(response.text || '{"transacoes":[]}');
-  return (parsed.transacoes || []).map((t) => normalizeTransacao(t, email)).filter(Boolean);
+  const transacoes = (parsed.transacoes || []).map((t) => normalizeTransacao(t, email, categorias)).filter(Boolean);
+  return posProcessar(transacoes, regras);
 }

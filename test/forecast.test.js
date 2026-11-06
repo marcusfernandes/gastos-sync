@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { addMeses, mediaVariavel, projecao, resumoMensal } from '../src/summary/forecast.js';
+import { addMeses, mediaVariavel, parcelamentos, projecao, resumoMensal } from '../src/summary/forecast.js';
 
 const t = (data, valor, categoria, tipo = 'compra', extra = {}) => ({ data, valor, categoria, tipo, conta_ou_cartao: 'Nubank', ...extra });
 
@@ -46,4 +46,25 @@ test('projecao acumula saldo e aplica mudanças de aluguel e custos pontuais', (
   assert.equal(p.meses[1].gastos_pontuais, 12000);
   assert.deepEqual(p.menor_saldo, { mes: '2027-01', valor: 8600 });
   assert.equal(p.alerta, null);
+});
+
+test('parcelamentos usam a parcela mais recente e projetam até o fim', () => {
+  const tx = [
+    t('2026-10-05', 100, 'Compras', 'compra', { estabelecimento: 'Magalu (parcela 1/10)', parcela_atual: 1, parcelas_total: 10, vencimento: '2026-10-12' }),
+    t('2026-10-05', 100, 'Compras', 'compra', { estabelecimento: 'Magalu (parcela 2/10)', parcela_atual: 2, parcelas_total: 10, vencimento: '2026-11-12' }),
+    t('2026-10-20', 50, 'Saúde', 'compra', { estabelecimento: 'Farmácia (parcela 2/2)', parcela_atual: 2, parcelas_total: 2, vencimento: '2026-11-12' }),
+    t('2026-10-21', 30, 'Lazer', 'compra', { estabelecimento: 'Cinema' }),
+  ];
+  const abertos = parcelamentos(tx);
+  const magalu = abertos.find((p) => p.estabelecimento === 'Magalu');
+  assert.equal(magalu.parcela_atual, 2);
+  assert.equal(magalu.mes_fim, '2027-07');
+  assert.equal(magalu.restante, 800);
+
+  const p = projecao(tx, [], { mesAtual: '2026-11', meses: 10, saldoInicial: 0, mesesHistorico: 3 });
+  assert.equal(p.media_variavel_mensal, 30); // parceladas ficam fora da média
+  assert.equal(p.meses[0].parcelas, 100);
+  assert.equal(p.meses.find((m) => m.mes === '2027-07').parcelas, 100);
+  assert.equal(p.meses.find((m) => m.mes === '2027-08').parcelas, 0);
+  assert.deepEqual(p.parcelamentos.map((x) => x.estabelecimento), ['Magalu']);
 });

@@ -7,7 +7,7 @@ import {
   resolveRefreshToken,
 } from './gmail/client.js';
 import { parseEmail } from './parser/gemini.js';
-import { createStorage } from './storage/index.js';
+import { contextoParser, createStorage } from './storage/index.js';
 
 const CONCORRENCIA = 4;
 const VALOR_EM_REAIS = /R\$\s?\d|\d{1,3}(\.\d{3})*,\d{2}\b/;
@@ -89,9 +89,10 @@ export async function ingestNow({ dryRun = false, storage, log = console.log } =
   const gmail = createGmail(await resolveRefreshToken(store));
   const forwardTo = await resolveForwardingAddress(gmail);
   if (forwardTo) log(`Também lendo e-mails encaminhados para ${forwardTo}`);
+  const contexto = await contextoParser(store);
   return runIngestion({
     fetchEmails: () => fetchBankEmails(gmail, forwardTo),
-    parse: (email) => parseEmail(email),
+    parse: (email) => parseEmail(email, undefined, contexto),
     storage: store,
     markProcessed: (ids) => markAsProcessed(gmail, ids),
     dryRun,

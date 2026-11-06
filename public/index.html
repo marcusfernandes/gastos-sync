@@ -78,6 +78,11 @@
   </section>
 
   <section>
+    <h2>Parcelamentos em aberto <span class="mut" id="parc-info"></span></h2>
+    <div style="max-height:360px; overflow:auto"><table id="parc"></table></div>
+  </section>
+
+  <section>
     <h2>Transações do mês <span class="mut" id="tx-count"></span></h2>
     <div style="max-height:420px; overflow:auto"><table id="tx"></table></div>
   </section>
@@ -112,7 +117,34 @@
   </section>
 
   <section>
-    <h2>Planejamento: renda, gastos fixos e custos da mudança</h2>
+    <h2>Receitas fixas (salários) <span class="mut" id="rec-info"></span></h2>
+    <p class="mut">Entram automaticamente em todos os meses a partir do início. Para um aumento, use "Editar" e informe o mês em que passa a valer (os meses anteriores mantêm o valor antigo). Em caso de demissão, use "Encerrar".</p>
+    <form class="row" id="rec-form" onsubmit="salvarReceita(event)">
+      <input type="hidden" name="id" />
+      <label>Quem recebe <input name="responsavel" list="rec-pessoas" required placeholder="Ex.: Marcus" style="width:130px" /></label>
+      <datalist id="rec-pessoas"></datalist>
+      <label>Descrição <input name="descricao" required value="Salário" style="width:140px" /></label>
+      <label>Valor líquido (R$) <input name="valor" type="number" step="0.01" min="0.01" required style="width:120px" /></label>
+      <label id="rec-inicio-l">Recebe desde <input name="inicio" type="month" required /></label>
+      <label id="rec-apartir-l" style="display:none">Novo valor vale a partir de <input name="a_partir_de" type="month" /></label>
+      <button type="submit" id="rec-btn" style="align-self:flex-end">Adicionar receita</button>
+      <button type="button" class="sec" id="rec-cancel" style="align-self:flex-end; display:none" onclick="cancelarReceita()">Cancelar</button>
+    </form>
+    <table id="rec"></table>
+  </section>
+
+  <section class="half">
+    <h2>Categorias</h2>
+    <p class="mut">A IA escolhe entre estas categorias; o que ela não reconhecer fica em "Outros". Troque a categoria de um gasto na lista de transações e marque "lembrar" para aplicar a todos daquele estabelecimento.</p>
+    <form class="row" onsubmit="addCategoria(event)">
+      <input name="nome" required maxlength="40" placeholder="Nova categoria (ex.: Pets)" style="flex:1" />
+      <button type="submit">Criar</button>
+    </form>
+    <div id="cats" style="margin-top:10px; max-height:300px; overflow:auto"></div>
+  </section>
+
+  <section>
+    <h2>Planejamento: gastos fixos, custos da mudança e entradas avulsas</h2>
     <form class="row" id="plan-form" onsubmit="addPlan(event)">
       <label>Descrição <input name="descricao" required placeholder="Ex.: Caução novo apê" /></label>
       <label>Tipo <select name="direcao"><option value="saida">Saída</option><option value="entrada">Entrada</option></select></label>
@@ -182,17 +214,22 @@ async function carregarRelatorio() {
   $('fat').innerHTML = r.faturas.itens.length ? r.faturas.itens.map((f) => `<tr><td>${esc(f.conta)}</td><td>${esc(f.vencimento || '')}</td><td class="n">${brl(f.valor)}</td></tr>`).join('') : '<tr><td class="mut">Nenhuma fatura registrada</td></tr>';
 
   $('proj-info').textContent = `saldo inicial ${brl(p.saldo_inicial)} · variável médio ${brl(p.media_variavel_mensal)}/mês`;
-  $('proj').innerHTML = '<tr><th>Mês</th><th class="n">Entradas</th><th class="n">Fixos</th><th class="n">Variáveis (média)</th><th class="n">Pontuais</th><th class="n">Resultado</th><th class="n">Saldo projetado</th></tr>' +
-    p.meses.map((m) => `<tr><td>${m.mes}</td><td class="n">${brl(m.entradas)}</td><td class="n">${brl(m.gastos_fixos)}</td><td class="n">${brl(m.gastos_variaveis_estimados)}</td>
+  $('proj').innerHTML = '<tr><th>Mês</th><th class="n">Entradas</th><th class="n">Fixos</th><th class="n">Variáveis (média)</th><th class="n">Parcelas</th><th class="n">Pontuais</th><th class="n">Resultado</th><th class="n">Saldo projetado</th></tr>' +
+    p.meses.map((m) => `<tr><td>${m.mes}</td><td class="n">${brl(m.entradas)}</td><td class="n">${brl(m.gastos_fixos)}</td><td class="n">${brl(m.gastos_variaveis_estimados)}</td><td class="n">${brl(m.parcelas)}</td>
       <td class="n" title="${esc(m.pontuais.map((x) => x.descricao + ': ' + brl(x.valor)).join('\n'))}">${brl(m.gastos_pontuais)}</td>
       <td class="n ${m.resultado_mes < 0 ? 'neg' : 'pos'}">${brl(m.resultado_mes)}</td><td class="n ${m.saldo_projetado < 0 ? 'neg' : ''}"><b>${brl(m.saldo_projetado)}</b></td></tr>`).join('');
+  const parc = p.parcelamentos || [];
+  $('parc-info').textContent = parc.length ? `${parc.length} compra(s) · ${brl(parc.reduce((a, x) => a + x.valor_parcela, 0))}/mês hoje · ${brl(parc.reduce((a, x) => a + x.restante, 0))} a pagar` : '';
+  $('parc').innerHTML = '<tr><th>Estabelecimento</th><th>Cartão</th><th>Categoria</th><th>Parcela</th><th>Última parcela</th><th class="n">Valor/mês</th><th class="n">Falta pagar</th></tr>' +
+    (parc.length ? parc.map((x) => `<tr><td>${esc(x.estabelecimento)}</td><td>${esc(x.conta_ou_cartao)}</td><td><span class="tag">${esc(x.categoria)}</span></td>
+      <td>${x.parcela_atual}/${x.parcelas_total}</td><td>${esc(mesBR(x.mes_fim))}</td><td class="n">${brl(x.valor_parcela)}</td><td class="n">${brl(x.restante)}</td></tr>`).join('') : '<tr><td colspan="7" class="mut">Nenhuma compra parcelada em aberto</td></tr>');
   $('proj-alerta').innerHTML = p.alerta ? `<div class="alert">${esc(p.alerta)}</div>` : '';
 
   const labels = p.meses.map((m) => m.mes);
   const datasets = [
     { type: 'line', label: 'Saldo projetado', data: p.meses.map((m) => m.saldo_projetado), borderColor: '#3b5bdb', backgroundColor: '#3b5bdb', tension: .25, yAxisID: 'y' },
     { type: 'bar', label: 'Entradas', data: p.meses.map((m) => m.entradas), backgroundColor: '#8ce99a' },
-    { type: 'bar', label: 'Saídas', data: p.meses.map((m) => -(m.gastos_fixos + m.gastos_variaveis_estimados + m.gastos_pontuais)), backgroundColor: '#ffa8a8' },
+    { type: 'bar', label: 'Saídas', data: p.meses.map((m) => -(m.gastos_fixos + m.gastos_variaveis_estimados + m.parcelas + m.gastos_pontuais)), backgroundColor: '#ffa8a8' },
   ];
   if (chart) chart.destroy();
   if (window.Chart) chart = new Chart($('chart'), { data: { labels, datasets }, options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${brl(c.raw)}` } } }, scales: { y: { ticks: { callback: (v) => brl(v) } } } } });
@@ -201,23 +238,28 @@ async function carregarRelatorio() {
 async function carregarTransacoes() {
   const tx = await api('/api/transacoes?mes=' + $('mes').value);
   $('tx-count').textContent = `${tx.length} lançamento(s)`;
-  $('tx').innerHTML = '<tr><th>Data</th><th>Estabelecimento</th><th>Conta/cartão</th><th>Categoria</th><th>Tipo</th><th class="n">Valor</th><th></th></tr>' +
+  $('tx').innerHTML = '<tr><th>Data</th><th>Estabelecimento</th><th>Conta/cartão</th><th>Categoria</th><th>Tipo</th><th>Pagamento</th><th class="n">Valor</th><th></th></tr>' +
     (tx.length ? tx.map((t) => `<tr><td>${esc(t.data)}</td><td>${esc(t.estabelecimento)}<div class="mut">${esc(t.origem_assunto || '')}</div></td><td>${esc(t.conta_ou_cartao)}</td>
-      <td><span class="tag">${esc(t.categoria)}</span></td><td>${esc(t.tipo)}</td><td class="n ${t.tipo === 'pix_recebido' ? 'pos' : ''}">${brl(t.valor)}</td>
-      <td>${t.id ? `<button class="dng" title="Excluir" onclick="delTx(${t.id})">✕</button>` : ''}</td></tr>`).join('') : '<tr><td colspan="7" class="mut">Nenhuma transação neste mês</td></tr>');
+      <td>${t.id ? selectCategoria(t) : `<span class="tag">${esc(t.categoria)}</span>`}</td><td>${esc(t.tipo)}</td><td>${pagamento(t)}</td><td class="n ${t.tipo === 'pix_recebido' ? 'pos' : ''}">${brl(t.valor)}</td>
+      <td>${t.id ? `<button class="dng" title="Excluir" onclick="delTx(${t.id})">✕</button>` : ''}</td></tr>`).join('') : '<tr><td colspan="8" class="mut">Nenhuma transação neste mês</td></tr>');
 }
 
+const ehReceita = (p) => p.direcao === 'entrada' && p.recorrente;
+
 async function carregarPlanejamento() {
-  const items = await api('/api/planejamento');
+  const todos = await api('/api/planejamento');
+  receitas = todos.filter(ehReceita);
+  renderReceitas();
+  const items = todos.filter((p) => !ehReceita(p));
   $('plan').innerHTML = '<tr><th>Descrição</th><th>Tipo</th><th>Categoria</th><th>Frequência</th><th>Início</th><th>Fim</th><th class="n">Valor</th><th></th></tr>' +
     (items.length ? items.map((p) => `<tr><td>${esc(p.descricao)}</td><td class="${p.direcao === 'entrada' ? 'pos' : 'neg'}">${p.direcao}</td><td><span class="tag">${esc(p.categoria)}</span></td>
       <td>${p.recorrente ? 'Mensal' : 'Única'}</td><td>${esc(String(p.inicio).slice(0, 7))}</td><td>${esc(p.fim ? String(p.fim).slice(0, 7) : '—')}</td><td class="n">${brl(p.valor)}</td>
-      <td>${p.id ? `<button class="dng" title="Excluir" onclick="delPlan(${p.id})">✕</button>` : ''}</td></tr>`).join('') : '<tr><td colspan="8" class="mut">Cadastre salário, aluguel e custos da mudança para ver a projeção</td></tr>');
+      <td>${p.id ? `<button class="dng" title="Excluir" onclick="delPlan(${p.id})">✕</button>` : ''}</td></tr>`).join('') : '<tr><td colspan="8" class="mut">Cadastre aluguel, contas fixas e custos da mudança para ver a projeção</td></tr>');
 }
 
 async function carregarTudo() {
   localStorage.setItem('saldo', $('saldo').value);
-  await Promise.all([carregarRelatorio(), carregarTransacoes(), carregarPlanejamento()]).catch((e) => toast(e.message, 8000));
+  await Promise.all([carregarCategorias(), carregarRelatorio(), carregarPlanejamento()]).then(carregarTransacoes).catch((e) => toast(e.message, 8000));
 }
 
 async function testarParser(salvar) {
@@ -261,14 +303,124 @@ async function addPlan(ev) {
 async function delPlan(id) { if (confirm('Excluir este item do planejamento?')) { await api('/api/planejamento?id=' + id, { method: 'DELETE' }).catch((e) => toast(e.message)); carregarTudo(); } }
 async function delTx(id) { if (confirm('Excluir esta transação?')) { await api('/api/transacoes?id=' + id, { method: 'DELETE' }).catch((e) => toast(e.message)); carregarTudo(); } }
 
+let categorias = [];
+let receitas = [];
+const mesBR = (m) => { const [y, mm] = String(m).split('-'); return `${['jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez'][Number(mm) - 1]}/${y}`; };
+
+function pagamento(t) {
+  if (t.tipo !== 'compra') return '';
+  if (!(t.parcelas_total > 1)) return '<span class="mut">à vista</span>';
+  const base = t.vencimento ? t.vencimento.slice(0, 7) : null;
+  const fim = base ? (() => { const [y, m] = base.split('-').map(Number); const d = new Date(Date.UTC(y, m - 1 + t.parcelas_total - t.parcela_atual, 1)); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`; })() : null;
+  return `${t.parcela_atual}/${t.parcelas_total}${fim ? `<div class="mut">até ${mesBR(fim)}</div>` : ''}`;
+}
+
+function selectCategoria(t) {
+  const opts = (categorias.includes(t.categoria) ? categorias : [t.categoria, ...categorias])
+    .map((c) => `<option ${c === t.categoria ? 'selected' : ''}>${esc(c)}</option>`).join('');
+  return `<select onchange="mudarCategoria(${t.id}, this)" data-atual="${esc(t.categoria)}" data-estab="${esc(t.estabelecimento)}">${opts}<option value="__nova">+ Nova categoria…</option></select>`;
+}
+
+async function mudarCategoria(id, sel) {
+  let categoria = sel.value;
+  try {
+    if (categoria === '__nova') {
+      categoria = (prompt('Nome da nova categoria:') || '').trim();
+      if (!categoria) { sel.value = sel.dataset.atual; return; }
+      await api('/api/categorias', { method: 'POST', body: { nome: categoria } });
+    }
+    const lembrar = confirm(`Aplicar "${categoria}" também aos outros gastos de "${sel.dataset.estab.replace(/\s*\(parcela.*\)/i, '')}" e às próximas faturas?\n\nOK = sim, lembrar · Cancelar = só este lançamento`);
+    const r = await api('/api/transacoes?id=' + id, { method: 'PATCH', body: { categoria, lembrar } });
+    toast(`${r.atualizadas} lançamento(s) atualizado(s)`);
+    carregarTudo();
+  } catch (e) { toast(e.message, 6000); sel.value = sel.dataset.atual; }
+}
+
+async function carregarCategorias() {
+  categorias = await api('/api/categorias');
+  $('plan-cat').innerHTML = categorias.map((c) => `<option ${c === 'Mudança' ? 'selected' : ''}>${esc(c)}</option>`).join('');
+  $('cats').innerHTML = categorias.map((c) => `<span class="tag" style="display:inline-flex; gap:4px; align-items:center; margin:2px">${esc(c)}${c === 'Outros' ? '' :
+    ` <button class="sec" style="padding:0 5px" title="Renomear" data-nome="${esc(c)}" onclick="renomearCategoria(this.dataset.nome)">✎</button><button class="dng" style="padding:0 5px" title="Excluir" data-nome="${esc(c)}" onclick="excluirCategoria(this.dataset.nome)">✕</button>`}</span>`).join('');
+}
+
+async function addCategoria(ev) {
+  ev.preventDefault();
+  try { await api('/api/categorias', { method: 'POST', body: { nome: ev.target.nome.value } }); ev.target.reset(); toast('Categoria criada'); carregarTudo(); }
+  catch (e) { toast(e.message, 6000); }
+}
+async function renomearCategoria(nome) {
+  const novo = (prompt(`Novo nome para "${nome}":`, nome) || '').trim();
+  if (!novo || novo === nome) return;
+  try { await api('/api/categorias?nome=' + encodeURIComponent(nome), { method: 'PATCH', body: { nome: novo } }); toast('Categoria renomeada'); carregarTudo(); }
+  catch (e) { toast(e.message, 6000); }
+}
+async function excluirCategoria(nome) {
+  if (!confirm(`Excluir "${nome}"? Os gastos dela voltam para "Outros".`)) return;
+  try { await api('/api/categorias?nome=' + encodeURIComponent(nome), { method: 'DELETE' }); toast('Categoria excluída'); carregarTudo(); }
+  catch (e) { toast(e.message, 6000); }
+}
+
+const substituida = (r) => receitas.some((o) => o.id !== r.id && o.responsavel === r.responsavel && o.descricao === r.descricao && String(o.inicio) > String(r.inicio));
+
+function renderReceitas() {
+  const mes = $('mes').value;
+  const ativas = receitas.filter((r) => String(r.inicio).slice(0, 7) <= mes && (!r.fim || String(r.fim).slice(0, 7) >= mes));
+  $('rec-info').textContent = ativas.length ? `${brl(ativas.reduce((a, r) => a + r.valor, 0))}/mês em ${mesBR(mes)}` : '';
+  $('rec-pessoas').innerHTML = [...new Set(receitas.map((r) => r.responsavel).filter(Boolean))].map((p) => `<option value="${esc(p)}">`).join('');
+  $('rec').innerHTML = '<tr><th>Quem</th><th>Descrição</th><th>Desde</th><th>Até</th><th class="n">Valor</th><th></th></tr>' +
+    (receitas.length ? receitas.map((r) => `<tr class="${r.fim && String(r.fim).slice(0, 7) < mesAtual ? 'mut' : ''}"><td>${esc(r.responsavel || '—')}</td><td>${esc(r.descricao)}</td>
+      <td>${mesBR(String(r.inicio).slice(0, 7))}</td><td>${r.fim ? mesBR(String(r.fim).slice(0, 7)) : 'atual'}</td><td class="n pos">${brl(r.valor)}</td>
+      <td style="white-space:nowrap"><button class="sec" onclick="editarReceita(${r.id})">Editar</button>
+        ${r.fim ? (substituida(r) ? '' : `<button class="sec" onclick="reabrirReceita(${r.id})">Reativar</button>`) : `<button class="sec" onclick="encerrarReceita(${r.id})">Encerrar</button>`}
+        <button class="dng" title="Excluir" onclick="delPlan(${r.id})">✕</button></td></tr>`).join('') : '<tr><td colspan="6" class="mut">Cadastre o seu salário e o da sua esposa</td></tr>');
+}
+
+function editarReceita(id) {
+  const r = receitas.find((x) => x.id === id); const f = $('rec-form');
+  f.id.value = id; f.responsavel.value = r.responsavel || ''; f.descricao.value = r.descricao; f.valor.value = r.valor;
+  f.inicio.value = String(r.inicio).slice(0, 7); f.inicio.required = false; f.a_partir_de.value = mesAtual > f.inicio.value ? mesAtual : '';
+  $('rec-inicio-l').style.display = 'none'; $('rec-apartir-l').style.display = '';
+  $('rec-btn').textContent = 'Salvar alteração'; $('rec-cancel').style.display = '';
+  f.valor.focus();
+}
+function cancelarReceita() {
+  const f = $('rec-form'); f.reset(); f.id.value = ''; f.inicio.value = mesAtual; f.inicio.required = true;
+  $('rec-inicio-l').style.display = ''; $('rec-apartir-l').style.display = 'none';
+  $('rec-btn').textContent = 'Adicionar receita'; $('rec-cancel').style.display = 'none';
+}
+async function salvarReceita(ev) {
+  ev.preventDefault();
+  const f = Object.fromEntries(new FormData(ev.target));
+  try {
+    if (f.id) {
+      const body = { responsavel: f.responsavel, descricao: f.descricao, valor: f.valor };
+      if (f.a_partir_de) body.a_partir_de = f.a_partir_de;
+      await api('/api/planejamento?id=' + f.id, { method: 'PATCH', body });
+    } else {
+      await api('/api/planejamento', { method: 'POST', body: { responsavel: f.responsavel, descricao: f.descricao, valor: f.valor, inicio: f.inicio, direcao: 'entrada', recorrente: true, categoria: 'Renda' } });
+    }
+    cancelarReceita(); toast('Receita salva'); carregarTudo();
+  } catch (e) { toast(e.message, 6000); }
+}
+async function encerrarReceita(id) {
+  const ultimo = prompt('Último mês em que esta receita entra (AAAA-MM):', mesAtual);
+  if (!ultimo) return;
+  try { await api('/api/planejamento?id=' + id, { method: 'PATCH', body: { fim: ultimo } }); toast('Receita encerrada'); carregarTudo(); }
+  catch (e) { toast(e.message, 6000); }
+}
+async function reabrirReceita(id) {
+  try { await api('/api/planejamento?id=' + id, { method: 'PATCH', body: { fim: null } }); toast('Receita reativada'); carregarTudo(); }
+  catch (e) { toast(e.message, 6000); }
+}
+
 (async function init() {
   $('mes').value = mesAtual;
   $('saldo').value = localStorage.getItem('saldo') || '';
   $('plan-form').inicio.value = mesAtual;
   $('mes').addEventListener('change', carregarTudo);
   if (new URLSearchParams(location.search).get('gmail') === 'conectado') { toast('Gmail conectado!'); history.replaceState(null, '', '/'); }
-  const cats = await api('/api/categorias').catch(() => []);
-  $('plan-cat').innerHTML = cats.map((c) => `<option ${c === 'Mudança' ? 'selected' : ''}>${esc(c)}</option>`).join('');
+  $('rec-form').inicio.value = mesAtual;
+  await carregarCategorias().catch(() => {});
   try { const s = await carregarStatus(); if (s.configurado.storage && !s.erro_storage) carregarTudo(); }
   catch (e) { toast(e.message, 8000); }
 })();

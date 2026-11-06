@@ -43,3 +43,19 @@ test('dedupeKey ignora caixa, acentos e pontuação do estabelecimento', () => {
   assert.equal(a, b);
   assert.notEqual(a, c);
 });
+
+test('parcelas viram campos estruturados e compras herdam o vencimento da fatura', async () => {
+  const { normalizeTransacao, posProcessar, chaveEstabelecimento } = await import('../src/parser/normalize.js');
+  const email = { id: 'f', date: '2026-11-05T10:00:00Z' };
+  const a = normalizeTransacao({ data: '2026-10-05', valor: 85.28, estabelecimento: 'Mercadolivre parcela 3/12', conta_ou_cartao: 'Nubank', categoria: 'Compras', tipo: 'compra' }, email);
+  assert.equal(a.estabelecimento, 'Mercadolivre (parcela 3/12)');
+  assert.deepEqual([a.parcela_atual, a.parcelas_total], [3, 12]);
+  const b = normalizeTransacao({ data: '2026-10-06', valor: 10, estabelecimento: 'Padaria', conta_ou_cartao: 'Nubank', categoria: 'Inexistente', tipo: 'compra' }, email, ['Outros', 'Padarias']);
+  assert.equal(b.categoria, 'Outros');
+  assert.equal(b.parcelas_total, null);
+  const f = normalizeTransacao({ data: '2026-11-05', valor: 95.28, estabelecimento: 'Fatura Nubank', conta_ou_cartao: 'Nubank', categoria: 'Contas e Serviços', tipo: 'fatura', vencimento: '2026-11-12' }, email);
+  const out = posProcessar([a, b, f], new Map([[chaveEstabelecimento('Padaria'), 'Padarias']]));
+  assert.equal(out[0].vencimento, '2026-11-12');
+  assert.equal(out[1].categoria, 'Padarias');
+  assert.equal(chaveEstabelecimento('Mercadolivre (parcela 4/12)'), chaveEstabelecimento('MERCADOLIVRE'));
+});

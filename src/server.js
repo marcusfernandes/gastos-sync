@@ -5,8 +5,9 @@ import { CATEGORIAS, config, googleRedirectUri, publicUrl } from './config.js';
 import { createOAuthClient, GMAIL_SCOPES, htmlToText, resolveRefreshToken } from './gmail/client.js';
 import { ingestNow } from './ingest.js';
 import { parseEmail } from './parser/gemini.js';
-import { parseData } from './parser/normalize.js';
-import { createStorage } from './storage/index.js';
+import { chaveEstabelecimento, parseData } from './parser/normalize.js';
+import { contextoParser, createStorage } from './storage/index.js';
+import { addMeses } from './summary/forecast.js';
 import { gerarRelatorio, mesCorrente } from './summary/service.js';
 
 const MES_RE = /^\d{4}-\d{2}$/;
@@ -70,7 +71,24 @@ async function readJson(req) {
   }
 }
 
-function validarPlanejamento(body) {
+const paraData = (v) => (v ? parseData(MES_RE.test(v) ? `${v}-01` : v) : null);
+const mesDe = (d) => String(d).slice(0, 7);
+
+async function categoriasValidas(storage) {
+  return (await contextoParser(storage)).categorias;
+}
+
+function exigir(storage, metodo) {
+  if (!storage[metodo]) throw new HttpError(501, 'Não suportado neste backend');
+}
+
+function nomeCategoria(v) {
+  const nome = String(v || '').trim().replace(/\s+/g, ' ');
+  if (!nome || nome.length > 40) throw new HttpError(400, 'Nome da categoria deve ter de 1 a 40 caracteres');
+  return nome;
+}
+
+function validarPlanejamento(body, categorias = CATEGORIAS) {
   const descricao = String(body.descricao || '').trim();
   const valor = Number(body.valor);
   const inicio = parseData(MES_RE.test(body.inicio) ? `${body.inicio}-01` : body.inicio);
@@ -83,10 +101,11 @@ function validarPlanejamento(body) {
     descricao,
     direcao: body.direcao,
     valor: Math.round(valor * 100) / 100,
-    categoria: CATEGORIAS.includes(body.categoria) ? body.categoria : 'Outros',
+    categoria: categorias.includes(body.categoria) ? body.categoria : 'Outros',
     recorrente: body.recorrente !== false && body.recorrente !== 'false',
     inicio,
     fim,
+    ...(body.responsavel ? { responsavel: String(body.responsavel).trim().slice(0, 60) } : {}),
   };
 }
 
@@ -105,7 +124,7 @@ async function status() {
     gmail_conectado: false,
     ultima_ingestao: null,
     redirect_uri: googleRedirectUri(),
-    gemini_model: process.env.GEMINI_MODEL || 'gemini-3.5-flash',
+    gemini_model: config.gemini.model,
     erro_storage: null,
   };
   if (configurado.storage) {
@@ -125,7 +144,37 @@ const routes = {
   'GET /health': async (req, res) => send(res, 200, { ok: true }),
   'GET /privacidade': async (req, res) => sendHtml(res, 200, privacidadeHtml),
   'GET /api/status': async (req, res) => send(res, 200, await status()),
-  'GET /api/categorias': async (req, res) => send(res, 200, CATEGORIAS),
+  'GET /api/categorias': async (req, res) => send(res, 200, await categoriasValidas(await getStorage())),
+
+  'POST /api/categorias': async (req, res) => {
+    const storage = await getStorage();
+    exigir(storage, 'addCategoria');
+    const nome = nomeCategoria((await readJson(req)).nome);
+    await storage.addCategoria(nome);
+    send(res, 201, { nome });
+  },
+
+  'PATCH /api/categorias': async (req, res, url) => {
+    const storage = await getStorage();
+    exigir(storage, 'renameCategoria');
+    const nome = url.searchParams.get('nome');
+    const novo = nomeCategoria((await readJson(req)).nome);
+    if (nome === 'Outros') throw new HttpError(400, '"Outros" não pode ser renomeada');
+    const atuais = await categoriasValidas(storage);
+    if (!atuais.includes(nome)) throw new HttpError(404, 'Categoria não encontrada');
+    if (atuais.includes(novo)) throw new HttpError(409, 'Já existe uma categoria com esse nome');
+    await storage.renameCategoria(nome, novo);
+    send(res, 200, { nome: novo });
+  },
+
+  'DELETE /api/categorias': async (req, res, url) => {
+    const storage = await getStorage();
+    exigir(storage, 'deleteCategoria');
+    const nome = url.searchParams.get('nome');
+    if (nome === 'Outros') throw new HttpError(400, '"Outros" não pode ser excluída');
+    await storage.deleteCategoria(nome);
+    send(res, 200, { ok: true });
+  },
 
   'GET /api/relatorio': async (req, res, url) => {
     const mes = url.searchParams.get('mes') || mesCorrente();
@@ -154,6 +203,28 @@ const routes = {
     );
   },
 
+  // Troca a categoria de um lançamento; com "lembrar", aplica a todos do mesmo estabelecimento
+  // (antigos e futuros).
+  'PATCH /api/transacoes': async (req, res, url) => {
+    const storage = await getStorage();
+    exigir(storage, 'updateTransacoes');
+    const id = url.searchParams.get('id');
+    const body = await readJson(req);
+    if (!(await categoriasValidas(storage)).includes(body.categoria)) throw new HttpError(400, 'Categoria inválida');
+    const todas = await storage.listTransacoes();
+    const alvo = todas.find((t) => String(t.id) === String(id));
+    if (!alvo) throw new HttpError(404, 'Transação não encontrada');
+    let ids = [alvo.id];
+    if (body.lembrar) {
+      exigir(storage, 'saveRegra');
+      const chave = chaveEstabelecimento(alvo.estabelecimento);
+      await storage.saveRegra(chave, body.categoria);
+      ids = todas.filter((t) => chaveEstabelecimento(t.estabelecimento) === chave).map((t) => t.id);
+    }
+    await storage.updateTransacoes(ids, { categoria: body.categoria });
+    send(res, 200, { atualizadas: ids.length });
+  },
+
   'DELETE /api/transacoes': async (req, res, url) => {
     const storage = await getStorage();
     if (!storage.deleteTransacao) throw new HttpError(501, 'Não suportado neste backend');
@@ -164,8 +235,44 @@ const routes = {
   'GET /api/planejamento': async (req, res) => send(res, 200, await (await getStorage()).listPlanejamento()),
 
   'POST /api/planejamento': async (req, res) => {
-    const item = validarPlanejamento(await readJson(req));
-    send(res, 201, await (await getStorage()).addPlanejamento(item));
+    const storage = await getStorage();
+    const item = validarPlanejamento(await readJson(req), await categoriasValidas(storage));
+    send(res, 201, await storage.addPlanejamento(item));
+  },
+
+  // Edita um item. Com "a_partir_de" (YYYY-MM) posterior ao início, preserva o histórico:
+  // o item atual termina no mês anterior e um novo começa nesse mês com os valores editados.
+  // "fim" (YYYY-MM) encerra o item: último mês em que ele conta.
+  'PATCH /api/planejamento': async (req, res, url) => {
+    const storage = await getStorage();
+    exigir(storage, 'updatePlanejamento');
+    const id = url.searchParams.get('id');
+    const atual = (await storage.listPlanejamento()).find((p) => String(p.id) === String(id));
+    if (!atual) throw new HttpError(404, 'Item não encontrado');
+    const body = await readJson(req);
+    const fimInformado = 'fim' in body;
+    const mesclado = validarPlanejamento(
+      {
+        ...atual,
+        ...body,
+        inicio: mesDe(atual.inicio),
+        fim: fimInformado ? body.fim : atual.fim,
+      },
+      await categoriasValidas(storage),
+    );
+    const aPartir = body.a_partir_de;
+    if (aPartir && !MES_RE.test(aPartir)) throw new HttpError(400, 'a_partir_de deve ser YYYY-MM');
+    if (aPartir && aPartir > mesDe(atual.inicio)) {
+      if (atual.fim && mesDe(atual.fim) < aPartir) throw new HttpError(400, 'Este item já terminou antes desse mês');
+      await storage.updatePlanejamento(atual.id, { fim: paraData(addMeses(aPartir, -1)) });
+      const novo = await storage.addPlanejamento({ ...mesclado, inicio: paraData(aPartir) });
+      return send(res, 200, novo);
+    }
+    if (mesclado.fim && mesDe(mesclado.fim) < mesDe(mesclado.inicio)) {
+      throw new HttpError(400, 'O fim não pode ser antes do início');
+    }
+    const { descricao, valor, categoria, recorrente, fim, responsavel } = mesclado;
+    send(res, 200, await storage.updatePlanejamento(atual.id, { descricao, valor, categoria, recorrente, fim, ...(responsavel ? { responsavel } : {}) }));
   },
 
   'DELETE /api/planejamento': async (req, res, url) => {
@@ -191,9 +298,10 @@ const routes = {
       body: /<html|<body|<table|<div/i.test(texto) ? htmlToText(texto) : texto,
       anexos,
     };
-    const transacoes = await parseEmail(email);
+    const storage = await getStorage();
+    const transacoes = await parseEmail(email, undefined, await contextoParser(storage));
     let salvas = null;
-    if (body.salvar && transacoes.length) salvas = await (await getStorage()).saveTransacoes(transacoes);
+    if (body.salvar && transacoes.length) salvas = await storage.saveTransacoes(transacoes);
     send(res, 200, { transacoes, salvas });
   },
 
