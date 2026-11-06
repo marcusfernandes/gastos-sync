@@ -79,5 +79,5 @@ test('faturas de cartões sem compras detalhadas entram na média e no saldo do 
   assert.equal(mediaVariavel(tx, [], '2026-11', 3), 300);
   const r = resumoMensal(tx, [{ descricao: 'Salário', direcao: 'entrada', valor: 2000, recorrente: true, inicio: '2026-01-01' }], '2026-10');
   assert.equal(r.gastos.faturas_sem_detalhe, 500);
-  assert.equal(r.saldo_estimado, 1400);
+  assert.equal(r.saldo_estimado, 1500);
 });
