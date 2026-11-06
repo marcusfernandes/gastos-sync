@@ -23,10 +23,14 @@ async function withRetry(fn, tries = 3) {
   }
 }
 
+const indisponivel = (err) => [500, 503, 404].includes(err?.status ?? err?.code);
+
 export async function parseEmail(email, ai = getClient()) {
-  const response = await withRetry(() =>
+  const { model, fallbackModel, thinking } = config.gemini;
+  const thinkingConfig = thinking === 'off' ? undefined : { thinkingLevel: thinking };
+  const gerar = (modelo) =>
     ai.models.generateContent({
-      model: config.gemini.model,
+      model: modelo,
       contents: [
         {
           role: 'user',
@@ -40,9 +44,16 @@ export async function parseEmail(email, ai = getClient()) {
         temperature: 0,
         responseMimeType: 'application/json',
         responseJsonSchema: transacoesSchema,
+        ...(thinkingConfig && { thinkingConfig }),
       },
-    }),
-  );
+    });
+  let response;
+  try {
+    response = await withRetry(() => gerar(model));
+  } catch (err) {
+    if (!fallbackModel || fallbackModel === model || !indisponivel(err)) throw err;
+    response = await withRetry(() => gerar(fallbackModel));
+  }
   const parsed = JSON.parse(response.text || '{"transacoes":[]}');
   return (parsed.transacoes || []).map((t) => normalizeTransacao(t, email)).filter(Boolean);
 }

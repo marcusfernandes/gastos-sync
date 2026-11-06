@@ -66,7 +66,9 @@ export const config = {
   get gemini() {
     return {
       apiKey: required('GEMINI_API_KEY'),
-      model: process.env.GEMINI_MODEL || 'gemini-3.5-flash',
+      model: process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite',
+      fallbackModel: process.env.GEMINI_MODEL_FALLBACK ?? 'gemini-3.5-flash-lite',
+      thinking: process.env.GEMINI_THINKING || 'minimal',
     };
   },
   get storageBackend() {

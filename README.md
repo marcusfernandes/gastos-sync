@@ -65,7 +65,7 @@ cp .env.example .env
 Escopo usado: `gmail.modify`, necessário apenas para aplicar o rótulo `gastos-sync/processado`; o script não apaga nem envia e-mails.
 
 ### 2. Gemini
-Crie uma chave em https://aistudio.google.com/apikey e defina `GEMINI_API_KEY`. O modelo padrão é `gemini-3.5-flash` (configurável via `GEMINI_MODEL`).
+Crie uma chave em https://aistudio.google.com/apikey e defina `GEMINI_API_KEY`. O modelo padrão é `gemini-3.1-flash-lite` com raciocínio mínimo (`GEMINI_THINKING=minimal`), o mais barato que extraiu 100% de uma fatura de teste com 34 lançamentos (~US$ 0,005 por fatura, ~US$ 0,0003 por e-mail de notificação). Se ele estiver indisponível, o app usa `GEMINI_MODEL_FALLBACK` (padrão `gemini-3.5-flash-lite`). Ambos configuráveis via env.
 
 ### 3a. Supabase (padrão)
 1. Crie um projeto e rode `supabase/migrations/001_init.sql` no SQL Editor.
