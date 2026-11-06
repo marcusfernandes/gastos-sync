@@ -71,7 +71,7 @@ export const config = {
   },
   get supabase() {
     return {
-      url: required('SUPABASE_URL'),
+      url: required('SUPABASE_URL').replace(/\/rest\/v1\/?$/, '').replace(/\/$/, ''),
       serviceKey: required('SUPABASE_SERVICE_ROLE_KEY'),
     };
   },
