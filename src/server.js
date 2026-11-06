@@ -104,7 +104,7 @@ async function status() {
     gmail_conectado: false,
     ultima_ingestao: null,
     redirect_uri: googleRedirectUri(),
-    gemini_model: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+    gemini_model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
     erro_storage: null,
   };
   if (configurado.storage) {
