@@ -1,0 +1,24 @@
+{
+  "name": "gastos-sync",
+  "version": "0.1.0",
+  "description": "Ingestão automatizada de gastos via Gmail + Gemini, com persistência no Supabase/Google Sheets e projeção de saldo.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20.6"
+  },
+  "scripts": {
+    "auth:gmail": "node --env-file=.env scripts/auth-gmail.js",
+    "ingest": "node --env-file=.env src/ingest.js",
+    "ingest:dry": "node --env-file=.env src/ingest.js --dry-run",
+    "parse:file": "node --env-file=.env scripts/parse-file.js",
+    "resumo": "node --env-file=.env src/summary/cli.js",
+    "server": "node --env-file=.env src/server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@google/genai": "^3.0.0",
+    "@supabase/supabase-js": "^2.119.0",
+    "googleapis": "^189.0.0"
+  }
+}
