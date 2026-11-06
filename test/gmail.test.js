@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { buildQuery, extractBody, findPdfAttachments, forwardingAddress, htmlToText } from '../src/gmail/client.js';
+import { AUTOENVIO, buildQuery, extractBody, findPdfAttachments, forwardingAddress, htmlToText } from '../src/gmail/client.js';
 
 const b64url = (s) => Buffer.from(s).toString('base64').replace(/\+/g, '-').replace(/\//g, '_');
 
@@ -35,7 +35,7 @@ test('buildQuery exclui e-mails já processados', () => {
 
 test('buildQuery inclui o endereço de encaminhamento como alternativa', () => {
   const q = buildQuery({ query: 'from:nubank.com.br', lookbackDays: 3, processedLabel: 'p', forwardTo: 'a+gastos@gmail.com' });
-  assert.equal(q, '{(from:nubank.com.br) to:a+gastos@gmail.com} newer_than:3d -label:p');
+  assert.equal(q, `{(from:nubank.com.br) to:a+gastos@gmail.com (${AUTOENVIO})} newer_than:3d -label:p`);
 });
 
 test('forwardingAddress deriva <usuario>+gastos do e-mail da conta', () => {

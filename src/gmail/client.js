@@ -112,9 +112,12 @@ async function getOrCreateLabelId(gmail, name) {
   return created.data.id;
 }
 
+export const AUTOENVIO = 'from:me to:me filename:pdf (fatura OR extrato OR comprovante OR boleto)';
+
 export function buildQuery({ query, lookbackDays, processedLabel, forwardTo }) {
   const label = processedLabel.replace(/[\s/]+/g, '-');
-  const origem = forwardTo ? `{(${query}) to:${forwardTo}}` : query;
+  // Também aceita PDFs de fatura/extrato que você envia para si mesmo pelo app do banco.
+  const origem = forwardTo ? `{(${query}) to:${forwardTo} (${AUTOENVIO})}` : query;
   return `${origem} newer_than:${lookbackDays}d -label:${label}`;
 }
 
