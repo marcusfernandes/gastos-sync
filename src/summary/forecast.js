@@ -3,6 +3,14 @@ const GASTO_TIPOS = new Set(['compra', 'pix_enviado', 'debito', 'outro']);
 const round = (n) => Math.round(n * 100) / 100;
 const sum = (items) => round(items.reduce((acc, i) => acc + i.valor, 0));
 const mesDe = (date) => String(date).slice(0, 7);
+const cartaoDe = (t) => String(t.conta_ou_cartao || '').toLowerCase().split(/\s+/)[0];
+
+// Faturas de cartões cujas compras não chegam detalhadas (ex.: só o total veio da planilha
+// ou do e-mail) contam como gasto pelo valor total; as demais já entram compra a compra.
+export function faturasSemDetalhe(transacoes) {
+  const detalhados = new Set(transacoes.filter((t) => t.tipo === 'compra').map(cartaoDe));
+  return transacoes.filter((t) => t.tipo === 'fatura' && !detalhados.has(cartaoDe(t)));
+}
 
 export function addMeses(mes, n) {
   const [y, m] = mes.split('-').map(Number);
@@ -75,6 +83,8 @@ export function resumoMensal(transacoes, planejamento, mes) {
   const totalFixos = sum(fixos);
   const totalPontuais = sum(pontuais);
   const totalGastos = sum(gastos);
+  const semDetalhe = faturasSemDetalhe(transacoes).filter((t) => mesDe(t.vencimento || t.data) === mes);
+  const totalSemDetalhe = sum(semDetalhe);
 
   return {
     mes,
@@ -83,6 +93,7 @@ export function resumoMensal(transacoes, planejamento, mes) {
       fixos_planejados: totalFixos,
       pontuais_planejados: totalPontuais,
       registrados: totalGastos,
+      faturas_sem_detalhe: totalSemDetalhe,
       por_categoria: porCategoria(gastos),
     },
     faturas: {
@@ -91,7 +102,7 @@ export function resumoMensal(transacoes, planejamento, mes) {
     },
     // "registrados" já inclui o que foi pago no mês (inclusive aluguel/contas via Pix);
     // os planejados entram só se ainda não houver registros suficientes.
-    saldo_estimado: round(totalEntradas - Math.max(totalGastos, totalFixos + totalPontuais)),
+    saldo_estimado: round(totalEntradas - Math.max(totalGastos, totalFixos + totalPontuais) - totalSemDetalhe),
   };
 }
 
@@ -105,8 +116,9 @@ export function mediaVariavel(transacoes, planejamento, mesAtual, nMeses) {
   const variaveis = transacoes.filter(
     (t) => GASTO_TIPOS.has(t.tipo) && !parcelado(t) && !categoriasFixas.has(t.categoria) && meses.includes(mesDe(t.data)),
   );
-  const mesesComDados = new Set(variaveis.map((t) => mesDe(t.data))).size;
-  return mesesComDados ? round(sum(variaveis) / mesesComDados) : 0;
+  const faturas = faturasSemDetalhe(transacoes).filter((t) => meses.includes(mesDe(t.vencimento || t.data)));
+  const mesesComDados = new Set([...variaveis.map((t) => mesDe(t.data)), ...faturas.map((t) => mesDe(t.vencimento || t.data))]).size;
+  return mesesComDados ? round((sum(variaveis) + sum(faturas)) / mesesComDados) : 0;
 }
 
 export function projecao(transacoes, planejamento, { mesAtual, meses = 6, saldoInicial = 0, mesesHistorico = 3 }) {

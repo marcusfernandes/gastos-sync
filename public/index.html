@@ -207,6 +207,7 @@ async function carregarRelatorio() {
     kpi('Fixos planejados', brl(r.gastos.fixos_planejados)),
     kpi('Pontuais planejados', brl(r.gastos.pontuais_planejados)),
     kpi('Faturas vencendo', brl(r.faturas.total_vencendo)),
+    kpi('Faturas sem detalhe', brl(r.gastos.faturas_sem_detalhe || 0)),
     kpi('Saldo estimado do mês', brl(r.saldo_estimado), r.saldo_estimado < 0 ? 'neg' : 'pos'),
   ].join('');
   const cats = Object.entries(r.gastos.por_categoria);
