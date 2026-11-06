@@ -1,5 +1,11 @@
 import { pathToFileURL } from 'node:url';
-import { createGmail, fetchBankEmails, markAsProcessed, resolveRefreshToken } from './gmail/client.js';
+import {
+  createGmail,
+  fetchBankEmails,
+  markAsProcessed,
+  resolveForwardingAddress,
+  resolveRefreshToken,
+} from './gmail/client.js';
 import { parseEmail } from './parser/gemini.js';
 import { createStorage } from './storage/index.js';
 
@@ -49,8 +55,10 @@ export async function runIngestion({ fetchEmails, parse, storage, markProcessed,
 export async function ingestNow({ dryRun = false, storage, log = console.log } = {}) {
   const store = storage ?? (await createStorage());
   const gmail = createGmail(await resolveRefreshToken(store));
+  const forwardTo = await resolveForwardingAddress(gmail);
+  if (forwardTo) log(`Também lendo e-mails encaminhados para ${forwardTo}`);
   return runIngestion({
-    fetchEmails: () => fetchBankEmails(gmail),
+    fetchEmails: () => fetchBankEmails(gmail, forwardTo),
     parse: (email) => parseEmail(email),
     storage: store,
     markProcessed: (ids) => markAsProcessed(gmail, ids),

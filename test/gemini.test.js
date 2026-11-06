@@ -26,7 +26,7 @@ test('parseEmail pede JSON estruturado e normaliza a resposta', async () => {
 
   assert.equal(request.config.responseMimeType, 'application/json');
   assert.ok(request.config.responseJsonSchema.properties.transacoes);
-  assert.match(request.contents, /Compra aprovada/);
+  assert.match(request.contents[0].parts[0].text, /Compra aprovada/);
   assert.equal(result.length, 1);
   assert.equal(result[0].estabelecimento, 'Padaria São José');
   assert.equal(result[0].origem_email_id, 'm1');

@@ -41,6 +41,9 @@ Regras:
 - Se a data não estiver no corpo, use a data de recebimento do e-mail: ${email.date.slice(0, 10)}.
 - "conta_ou_cartao": nome do banco e, se houver, o cartão (ex: "Nubank", "Itaú Personnalité Visa final 1234").
 - "categoria": escolha a mais provável pelo estabelecimento. Pix recebido -> "Renda" se parecer salário/pagamento, senão "Transferências".
+- E-mails encaminhados ("Forwarded message", "Mensagem encaminhada", "Fwd:"): use o remetente e o conteúdo da mensagem original.
+- PDF de fatura de cartão anexado: extraia CADA lançamento da fatura como "compra" (data da compra, valor, estabelecimento) e, além deles, uma linha "fatura" com o valor total e o vencimento. Ignore pagamentos da fatura anterior, créditos, estornos e o resumo/limites. Para compras parceladas use o valor da parcela e acrescente "(parcela X/Y)" ao estabelecimento.
+- PDF de extrato ou comprovante: extraia cada movimentação com o "tipo" adequado.
 - Não invente dados.
 
 E-mail:
@@ -48,5 +51,5 @@ De: ${email.from}
 Assunto: ${email.subject}
 Recebido em: ${email.date}
 
-${email.body.slice(0, 12000)}`;
+${email.body.slice(0, 12000)}${email.anexos?.length ? `\n\nAnexos em PDF: ${email.anexos.map((a) => a.filename).join(', ')}` : ''}`;
 }

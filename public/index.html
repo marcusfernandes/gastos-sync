@@ -83,12 +83,15 @@
   </section>
 
   <section class="half">
-    <h2>Testar parser (colar e-mail)</h2>
+    <h2>Testar parser (colar e-mail ou enviar PDF)</h2>
     <div class="row">
       <input id="p-assunto" placeholder="Assunto (opcional)" style="flex:1" />
       <input id="p-remetente" placeholder="Remetente (opcional)" style="flex:1" />
     </div>
     <textarea id="p-texto" placeholder="Cole aqui o texto ou o HTML do e-mail do banco..."></textarea>
+    <div class="row" style="margin-top:8px">
+      <label>PDF da fatura/extrato (opcional): <input type="file" id="p-pdf" accept="application/pdf,.pdf" /></label>
+    </div>
     <div class="row" style="margin-top:8px">
       <button onclick="testarParser(false)">Extrair</button>
       <button class="sec" onclick="testarParser(true)">Extrair e salvar</button>
@@ -99,7 +102,8 @@
   <section class="half">
     <h2>Ingestão do Gmail</h2>
     <p class="mut">Busca e-mails de bancos dos últimos dias que ainda não têm o rótulo de processado.
-      A simulação só mostra o que seria salvo; "Rodar agora" grava e rotula os e-mails.</p>
+      A simulação só mostra o que seria salvo; "Rodar agora" grava e rotula os e-mails.
+      Para importar faturas em PDF ou comprovantes, encaminhe-os para <b>seu-email+gastos@gmail.com</b>.</p>
     <div class="row">
       <button class="sec" onclick="ingerir(true)">Simular</button>
       <button onclick="ingerir(false)">Rodar agora</button>
@@ -219,7 +223,15 @@ async function carregarTudo() {
 async function testarParser(salvar) {
   const out = $('p-out'); out.style.display = 'block'; out.textContent = 'Consultando o Gemini...';
   try {
-    const r = await api('/api/parse', { method: 'POST', body: { texto: $('p-texto').value, assunto: $('p-assunto').value, remetente: $('p-remetente').value, salvar } });
+    const anexos = [];
+    const file = $('p-pdf').files[0];
+    if (file) {
+      if (file.size > 15 * 1024 * 1024) throw new Error('PDF maior que 15 MB');
+      const data = await new Promise((ok, fail) => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result).split(',')[1]); fr.onerror = fail; fr.readAsDataURL(file); });
+      anexos.push({ filename: file.name, mimeType: 'application/pdf', data });
+      out.textContent = 'Lendo o PDF com o Gemini... (faturas longas podem levar até 1 min)';
+    }
+    const r = await api('/api/parse', { method: 'POST', body: { texto: $('p-texto').value, assunto: $('p-assunto').value || (file ? file.name : ''), remetente: $('p-remetente').value, anexos, salvar } });
     out.textContent = JSON.stringify(r.transacoes, null, 2) + (r.salvas ? `\n\nSalvas: ${r.salvas.inserted.length} | Duplicadas: ${r.salvas.skipped}` : '');
     if (salvar) carregarTudo();
   } catch (e) { out.textContent = 'Erro: ' + e.message; }

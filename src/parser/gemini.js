@@ -26,7 +26,15 @@ export async function parseEmail(email, ai = getClient()) {
   const response = await withRetry(() =>
     ai.models.generateContent({
       model: config.gemini.model,
-      contents: buildPrompt(email),
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { text: buildPrompt(email) },
+            ...(email.anexos || []).map((a) => ({ inlineData: { mimeType: a.mimeType, data: a.data } })),
+          ],
+        },
+      ],
       config: {
         temperature: 0,
         responseMimeType: 'application/json',

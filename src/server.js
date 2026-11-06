@@ -59,7 +59,7 @@ async function readJson(req) {
   const chunks = [];
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > 1_000_000) throw new HttpError(413, 'Corpo da requisição muito grande');
+    if (size > 25_000_000) throw new HttpError(413, 'Corpo da requisição muito grande');
     chunks.push(chunk);
   }
   if (!chunks.length) return {};
@@ -178,13 +178,18 @@ const routes = {
   'POST /api/parse': async (req, res) => {
     const body = await readJson(req);
     const texto = String(body.texto || '').trim();
-    if (!texto) throw new HttpError(400, 'Cole o texto do e-mail no campo "texto"');
+    const anexos = (Array.isArray(body.anexos) ? body.anexos : [])
+      .filter((a) => a?.data && a.mimeType === 'application/pdf')
+      .slice(0, 3)
+      .map((a) => ({ filename: String(a.filename || 'anexo.pdf'), mimeType: a.mimeType, data: String(a.data) }));
+    if (!texto && !anexos.length) throw new HttpError(400, 'Cole o texto do e-mail ou anexe um PDF');
     const email = {
       id: null,
       from: String(body.remetente || ''),
       subject: String(body.assunto || 'E-mail colado no painel'),
       date: new Date().toISOString(),
       body: /<html|<body|<table|<div/i.test(texto) ? htmlToText(texto) : texto,
+      anexos,
     };
     const transacoes = await parseEmail(email);
     let salvas = null;

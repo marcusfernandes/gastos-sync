@@ -77,6 +77,12 @@ Crie uma chave em https://aistudio.google.com/apikey e defina `GEMINI_API_KEY`. 
 - `transacoes`: o cabeçalho é criado automaticamente.
 - `planejamento`: cabeçalho `descricao | direcao | valor | categoria | recorrente | inicio | fim` (direcao = `entrada`/`saida`, recorrente = `true`/`false`, datas `YYYY-MM-DD` ou `dd/mm/aaaa`).
 
+## Faturas em PDF e e-mails encaminhados
+
+- PDFs anexados (até 3 por e-mail, 15 MB cada) são enviados ao Gemini: numa fatura de cartão, cada lançamento vira uma `compra` e o total vira uma linha `fatura` com o vencimento. PDFs protegidos por senha não são lidos.
+- Além dos remetentes de `GMAIL_QUERY`, o app lê o que for enviado para `<seu-email>+gastos@<domínio>` (ajuste com `GMAIL_ENCAMINHAMENTO=<endereço>` ou desligue com `off`). Use para encaminhar faturas e comprovantes de outros lugares.
+- No painel dá para testar enviando um PDF direto na caixa "Testar parser".
+
 ## Deploy grátis (Render + Supabase + GitHub Actions)
 
 1. Supabase: crie o projeto (região **East US / N. Virginia**, perto do Render) e rode `supabase/migrations/001_init.sql`.

@@ -57,6 +57,46 @@ export function extractBody(payload) {
   return text || htmlToText(html.join('\n'));
 }
 
+const MAX_ANEXOS = 3;
+const MAX_ANEXO_BYTES = 15 * 1024 * 1024;
+
+export function findPdfAttachments(payload) {
+  const found = [];
+  const walk = (part) => {
+    if (!part) return;
+    const isPdf = part.mimeType === 'application/pdf' || /\.pdf$/i.test(part.filename || '');
+    if (isPdf && (part.body?.attachmentId || part.body?.data) && (part.body?.size ?? 0) <= MAX_ANEXO_BYTES) {
+      found.push({ filename: part.filename || 'anexo.pdf', attachmentId: part.body.attachmentId, data: part.body.data });
+    }
+    (part.parts || []).forEach(walk);
+  };
+  walk(payload);
+  return found.slice(0, MAX_ANEXOS);
+}
+
+const toBase64 = (b64url) => b64url.replace(/-/g, '+').replace(/_/g, '/');
+
+async function downloadPdfs(gmail, messageId, payload) {
+  const anexos = [];
+  for (const a of findPdfAttachments(payload)) {
+    let data = a.data;
+    if (!data) {
+      const res = await gmail.users.messages.attachments.get({ userId: 'me', messageId, id: a.attachmentId });
+      data = res.data.data;
+    }
+    anexos.push({ filename: a.filename, mimeType: 'application/pdf', data: toBase64(data) });
+  }
+  return anexos;
+}
+
+export function forwardingAddress(email, setting) {
+  if (!setting || setting === 'off') return null;
+  if (setting !== 'auto') return setting;
+  if (!email) return null;
+  const [user, domain] = email.split('@');
+  return `${user.split('+')[0]}+gastos@${domain}`;
+}
+
 function header(headers, name) {
   return headers?.find((h) => h.name.toLowerCase() === name.toLowerCase())?.value || '';
 }
@@ -72,14 +112,22 @@ async function getOrCreateLabelId(gmail, name) {
   return created.data.id;
 }
 
-export function buildQuery({ query, lookbackDays, processedLabel }) {
+export function buildQuery({ query, lookbackDays, processedLabel, forwardTo }) {
   const label = processedLabel.replace(/[\s/]+/g, '-');
-  return `${query} newer_than:${lookbackDays}d -label:${label}`;
+  const origem = forwardTo ? `{(${query}) to:${forwardTo}}` : query;
+  return `${origem} newer_than:${lookbackDays}d -label:${label}`;
 }
 
-export async function fetchBankEmails(gmail) {
+export async function resolveForwardingAddress(gmail) {
+  const setting = config.gmail.encaminhamento;
+  if (setting !== 'auto') return forwardingAddress(null, setting);
+  const { data } = await gmail.users.getProfile({ userId: 'me' });
+  return forwardingAddress(data.emailAddress, setting);
+}
+
+export async function fetchBankEmails(gmail, forwardTo) {
   const cfg = config.gmail;
-  const q = buildQuery(cfg);
+  const q = buildQuery({ ...cfg, forwardTo: forwardTo === undefined ? await resolveForwardingAddress(gmail) : forwardTo });
   const messages = [];
   let pageToken;
   do {
@@ -104,6 +152,7 @@ export async function fetchBankEmails(gmail) {
       subject: header(headers, 'Subject'),
       date: new Date(Number(data.internalDate)).toISOString(),
       body: extractBody(data.payload) || data.snippet || '',
+      anexos: await downloadPdfs(gmail, id, data.payload),
     });
   }
   return emails;

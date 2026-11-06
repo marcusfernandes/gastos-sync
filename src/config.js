@@ -58,6 +58,8 @@ export const config = {
       lookbackDays: int('GMAIL_LOOKBACK_DAYS', 7),
       maxMessages: int('GMAIL_MAX_MESSAGES', 50),
       processedLabel: process.env.GMAIL_PROCESSED_LABEL || 'gastos-sync/processado',
+      // Endereço para encaminhar faturas/comprovantes. 'auto' = <seu-email>+gastos@...; 'off' desliga.
+      encaminhamento: process.env.GMAIL_ENCAMINHAMENTO || 'auto',
     };
   },
   get gemini() {
