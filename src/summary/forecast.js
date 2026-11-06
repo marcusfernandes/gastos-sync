@@ -8,8 +8,12 @@ const cartaoDe = (t) => String(t.conta_ou_cartao || '').toLowerCase().split(/\s+
 // Faturas de cartões cujas compras não chegam detalhadas (ex.: só o total veio da planilha
 // ou do e-mail) contam como gasto pelo valor total; as demais já entram compra a compra.
 export function faturasSemDetalhe(transacoes) {
-  const detalhados = new Set(transacoes.filter((t) => t.tipo === 'compra').map(cartaoDe));
-  return transacoes.filter((t) => t.tipo === 'fatura' && !detalhados.has(cartaoDe(t)));
+  const detalhados = new Set(
+    transacoes
+      .filter((t) => t.tipo === 'compra')
+      .map((t) => `${cartaoDe(t)}|${t.vencimento ? mesDe(t.vencimento) : addMeses(mesDe(t.data), 1)}`),
+  );
+  return transacoes.filter((t) => t.tipo === 'fatura' && !detalhados.has(`${cartaoDe(t)}|${mesDe(t.vencimento || t.data)}`));
 }
 
 export function addMeses(mes, n) {

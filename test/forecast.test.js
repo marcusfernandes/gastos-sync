@@ -71,11 +71,12 @@ test('parcelamentos usam a parcela mais recente e projetam até o fim', () => {
 
 test('faturas de cartões sem compras detalhadas entram na média e no saldo do mês', () => {
   const tx = [
-    { data: '2026-10-05', valor: 100, conta_ou_cartao: 'Nubank final 1', categoria: 'Lazer', tipo: 'compra' },
+    { data: '2026-09-05', vencimento: '2026-10-10', valor: 100, conta_ou_cartao: 'Nubank final 1', categoria: 'Lazer', tipo: 'compra' },
+    { data: '2026-08-10', vencimento: '2026-08-10', valor: 300, conta_ou_cartao: 'Nubank', categoria: 'Outros', tipo: 'fatura' },
     { data: '2026-10-10', vencimento: '2026-10-10', valor: 999, conta_ou_cartao: 'Nubank', categoria: 'Outros', tipo: 'fatura' },
     { data: '2026-10-10', vencimento: '2026-10-10', valor: 500, conta_ou_cartao: 'Infinit', categoria: 'Outros', tipo: 'fatura' },
   ];
-  assert.equal(mediaVariavel(tx, [], '2026-11', 3), 600);
+  assert.equal(mediaVariavel(tx, [], '2026-11', 3), 300);
   const r = resumoMensal(tx, [{ descricao: 'Salário', direcao: 'entrada', valor: 2000, recorrente: true, inicio: '2026-01-01' }], '2026-10');
   assert.equal(r.gastos.faturas_sem_detalhe, 500);
   assert.equal(r.saldo_estimado, 1400);
