@@ -10,8 +10,9 @@ import { createStorage } from './storage/index.js';
 import { gerarRelatorio, mesCorrente } from './summary/service.js';
 
 const MES_RE = /^\d{4}-\d{2}$/;
-const PUBLIC_PATHS = new Set(['/health']);
+const PUBLIC_PATHS = new Set(['/health', '/privacidade']);
 const painelHtml = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+const privacidadeHtml = await readFile(new URL('../public/privacidade.html', import.meta.url), 'utf8');
 const oauthStates = new Map();
 let ingestaoEmAndamento = false;
 
@@ -122,6 +123,7 @@ async function status() {
 const routes = {
   'GET /': async (req, res) => sendHtml(res, 200, painelHtml),
   'GET /health': async (req, res) => send(res, 200, { ok: true }),
+  'GET /privacidade': async (req, res) => sendHtml(res, 200, privacidadeHtml),
   'GET /api/status': async (req, res) => send(res, 200, await status()),
   'GET /api/categorias': async (req, res) => send(res, 200, CATEGORIAS),
 
