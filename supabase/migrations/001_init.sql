@@ -34,3 +34,12 @@ create table if not exists public.planejamento (
 -- Acesso apenas pela service role (o script); nenhum acesso anônimo.
 alter table public.transacoes enable row level security;
 alter table public.planejamento enable row level security;
+
+-- Configurações do app (ex.: refresh token do Gmail obtido pelo botão "Conectar Gmail").
+create table if not exists public.app_config (
+  chave          text primary key,
+  valor          text not null,
+  atualizado_em  timestamptz not null default now()
+);
+
+alter table public.app_config enable row level security;

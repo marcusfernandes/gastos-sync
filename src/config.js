@@ -38,13 +38,22 @@ function int(name, fallback) {
   return n;
 }
 
+export function publicUrl() {
+  return (process.env.PUBLIC_URL || process.env.RENDER_EXTERNAL_URL || '').replace(/\/$/, '');
+}
+
+export function googleRedirectUri() {
+  if (process.env.GOOGLE_REDIRECT_URI) return process.env.GOOGLE_REDIRECT_URI;
+  return publicUrl() ? `${publicUrl()}/oauth2callback` : 'http://localhost:53682/oauth2callback';
+}
+
 export const config = {
   get gmail() {
     return {
       clientId: required('GOOGLE_CLIENT_ID'),
       clientSecret: required('GOOGLE_CLIENT_SECRET'),
-      refreshToken: required('GOOGLE_REFRESH_TOKEN'),
-      redirectUri: process.env.GOOGLE_REDIRECT_URI || 'http://localhost:53682/oauth2callback',
+      refreshToken: process.env.GOOGLE_REFRESH_TOKEN || null,
+      redirectUri: googleRedirectUri(),
       query: process.env.GMAIL_QUERY || DEFAULT_GMAIL_QUERY,
       lookbackDays: int('GMAIL_LOOKBACK_DAYS', 7),
       maxMessages: int('GMAIL_MAX_MESSAGES', 50),
@@ -78,5 +87,8 @@ export const config = {
       mesesHistoricoVariavel: int('MESES_HISTORICO_VARIAVEL', 3),
       port: int('PORT', 3000),
     };
+  },
+  get painel() {
+    return { senha: process.env.PAINEL_SENHA || null };
   },
 };

@@ -18,9 +18,11 @@ export function uniqueByKey(rows) {
   return rows.filter((r) => !seen.has(r.dedupe_key) && seen.add(r.dedupe_key));
 }
 
-// Interface: saveTransacoes(rows) -> { inserted, skipped }, listTransacoes({ desde }), listPlanejamento()
+// Interface: saveTransacoes(rows) -> { inserted, skipped }, listTransacoes({ desde }), listPlanejamento(),
+// addPlanejamento(item); opcionais: deleteTransacao(id), deletePlanejamento(id), getConfig(k), setConfig(k, v).
 export async function createStorage(backend = config.storageBackend) {
   if (backend === 'supabase') return (await import('./supabase.js')).createSupabaseStorage();
   if (backend === 'sheets') return (await import('./sheets.js')).createSheetsStorage();
-  throw new Error(`STORAGE_BACKEND inválido: ${backend} (use "supabase" ou "sheets")`);
+  if (backend === 'memory') return (await import('./memory.js')).createMemoryStorage();
+  throw new Error(`STORAGE_BACKEND inválido: ${backend} (use "supabase", "sheets" ou "memory")`);
 }

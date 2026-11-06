@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>gastos-sync</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#f5f6f8; --card:#fff; --txt:#1d2433; --mut:#6b7385; --pri:#3b5bdb; --ok:#2b8a3e; --bad:#c92a2a; --bd:#e3e6ec; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; background:var(--bg); color:var(--txt); }
+  header { background:#1d2433; color:#fff; padding:14px 24px; display:flex; gap:16px; align-items:center; flex-wrap:wrap; }
+  header h1 { font-size:18px; margin:0 12px 0 0; }
+  header .pill { font-size:12px; padding:3px 10px; border-radius:99px; background:#2f3a52; }
+  header .pill.ok { background:#2b8a3e; } header .pill.bad { background:#c92a2a; }
+  header .sp { flex:1; }
+  main { max-width:1200px; margin:0 auto; padding:20px; display:grid; gap:20px; grid-template-columns:repeat(12,1fr); }
+  section { background:var(--card); border:1px solid var(--bd); border-radius:10px; padding:16px 18px; grid-column:span 12; min-width:0; }
+  section.half { grid-column:span 6; }
+  @media (max-width:900px) { section.half { grid-column:span 12; } }
+  h2 { font-size:15px; margin:0 0 12px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  h2 .sp { flex:1; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; }
+  .kpi { border:1px solid var(--bd); border-radius:8px; padding:10px 12px; }
+  .kpi .l { color:var(--mut); font-size:12px; } .kpi .v { font-size:20px; font-weight:600; }
+  .pos { color:var(--ok); } .neg { color:var(--bad); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--bd); vertical-align:top; }
+  th { color:var(--mut); font-weight:500; } td.n, th.n { text-align:right; white-space:nowrap; }
+  input, select, textarea, button { font:inherit; }
+  input, select, textarea { border:1px solid var(--bd); border-radius:6px; padding:6px 8px; background:#fff; }
+  textarea { width:100%; min-height:160px; font-family:ui-monospace,Menlo,monospace; font-size:12px; }
+  button { border:0; border-radius:6px; padding:7px 14px; background:var(--pri); color:#fff; cursor:pointer; }
+  button.sec { background:#e7ebf5; color:var(--txt); } button.dng { background:transparent; color:var(--bad); padding:2px 6px; }
+  button:disabled { opacity:.5; cursor:wait; }
+  a.btn { display:inline-block; text-decoration:none; border-radius:6px; padding:6px 12px; background:#fff; color:#1d2433; font-weight:500; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+  .row label { font-size:12px; color:var(--mut); display:flex; flex-direction:column; gap:2px; }
+  pre { background:#0f1420; color:#d6deeb; padding:12px; border-radius:8px; overflow:auto; max-height:360px; font-size:12px; margin:8px 0 0; white-space:pre-wrap; }
+  .mut { color:var(--mut); font-size:12px; } .alert { background:#fff4e6; border:1px solid #ffd8a8; color:#a35200; padding:8px 12px; border-radius:6px; margin-top:10px; }
+  .tag { font-size:11px; padding:1px 7px; border-radius:99px; background:#edf0f7; color:#3a4560; white-space:nowrap; }
+  .chart-box { position:relative; height:280px; }
+  #toast { position:fixed; bottom:20px; right:20px; background:#1d2433; color:#fff; padding:10px 16px; border-radius:8px; display:none; max-width:420px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>gastos-sync</h1>
+  <span class="pill" id="st-gemini">Gemini</span>
+  <span class="pill" id="st-storage">Banco</span>
+  <span class="pill" id="st-gmail">Gmail</span>
+  <span class="mut" id="st-ultima" style="color:#aab3c5"></span>
+  <span class="sp"></span>
+  <a class="btn" id="btn-gmail" href="/auth/google">Conectar Gmail</a>
+</header>
+
+<main>
+  <section>
+    <h2>Resumo do mês
+      <input type="month" id="mes" />
+      <span class="sp"></span>
+      <label class="mut">Saldo atual (R$) <input type="number" id="saldo" step="0.01" style="width:120px" /></label>
+      <label class="mut">Meses <input type="number" id="meses" value="6" min="1" max="36" style="width:60px" /></label>
+      <button class="sec" onclick="carregarTudo()">Atualizar</button>
+    </h2>
+    <div class="cards" id="kpis"></div>
+    <div class="row" style="margin-top:14px; align-items:flex-start">
+      <div style="flex:1; min-width:260px"><div class="mut">Gastos por categoria</div><table id="cat"></table></div>
+      <div style="flex:1; min-width:260px"><div class="mut">Faturas vencendo no mês</div><table id="fat"></table></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Projeção de saldo <span class="mut" id="proj-info"></span></h2>
+    <div class="chart-box"><canvas id="chart"></canvas></div>
+    <table id="proj" style="margin-top:12px"></table>
+    <div id="proj-alerta"></div>
+  </section>
+
+  <section>
+    <h2>Transações do mês <span class="mut" id="tx-count"></span></h2>
+    <div style="max-height:420px; overflow:auto"><table id="tx"></table></div>
+  </section>
+
+  <section class="half">
+    <h2>Testar parser (colar e-mail)</h2>
+    <div class="row">
+      <input id="p-assunto" placeholder="Assunto (opcional)" style="flex:1" />
+      <input id="p-remetente" placeholder="Remetente (opcional)" style="flex:1" />
+    </div>
+    <textarea id="p-texto" placeholder="Cole aqui o texto ou o HTML do e-mail do banco..."></textarea>
+    <div class="row" style="margin-top:8px">
+      <button onclick="testarParser(false)">Extrair</button>
+      <button class="sec" onclick="testarParser(true)">Extrair e salvar</button>
+    </div>
+    <pre id="p-out" style="display:none"></pre>
+  </section>
+
+  <section class="half">
+    <h2>Ingestão do Gmail</h2>
+    <p class="mut">Busca e-mails de bancos dos últimos dias que ainda não têm o rótulo de processado.
+      A simulação só mostra o que seria salvo; "Rodar agora" grava e rotula os e-mails.</p>
+    <div class="row">
+      <button class="sec" onclick="ingerir(true)">Simular</button>
+      <button onclick="ingerir(false)">Rodar agora</button>
+    </div>
+    <pre id="i-out" style="display:none"></pre>
+  </section>
+
+  <section>
+    <h2>Planejamento: renda, gastos fixos e custos da mudança</h2>
+    <form class="row" id="plan-form" onsubmit="addPlan(event)">
+      <label>Descrição <input name="descricao" required placeholder="Ex.: Caução novo apê" /></label>
+      <label>Tipo <select name="direcao"><option value="saida">Saída</option><option value="entrada">Entrada</option></select></label>
+      <label>Valor (R$) <input name="valor" type="number" step="0.01" min="0.01" required style="width:110px" /></label>
+      <label>Categoria <select name="categoria" id="plan-cat"></select></label>
+      <label>Frequência <select name="recorrente"><option value="true">Mensal</option><option value="false">Única</option></select></label>
+      <label>Início / mês <input name="inicio" type="month" required /></label>
+      <label>Fim (opcional) <input name="fim" type="month" /></label>
+      <button type="submit" style="align-self:flex-end">Adicionar</button>
+    </form>
+    <table id="plan"></table>
+  </section>
+</main>
+<div id="toast"></div>
+
+<script>
+const brl = (n) => Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const $ = (id) => document.getElementById(id);
+const hoje = new Date();
+const mesAtual = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, '0')}`;
+let chart;
+
+function toast(msg, ms = 3500) { const t = $('toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(t._h); t._h = setTimeout(() => (t.style.display = 'none'), ms); }
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, { headers: { 'content-type': 'application/json' }, ...opts, body: opts.body ? JSON.stringify(opts.body) : undefined });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(data.erro || res.statusText), { data });
+  return data;
+}
+
+function pill(id, ok, label) { const el = $(id); el.className = 'pill ' + (ok ? 'ok' : 'bad'); el.textContent = label + (ok ? ' ✓' : ' ✗'); }
+
+async function carregarStatus() {
+  const s = await api('/api/status');
+  pill('st-gemini', s.configurado.gemini, 'Gemini');
+  pill('st-storage', s.configurado.storage && !s.erro_storage, ({ sheets: 'Sheets', memory: 'Memória' })[s.storage_backend] || 'Supabase');
+  pill('st-gmail', s.gmail_conectado, 'Gmail');
+  $('btn-gmail').textContent = s.gmail_conectado ? 'Reconectar Gmail' : 'Conectar Gmail';
+  $('btn-gmail').style.display = s.configurado.google_oauth ? '' : 'none';
+  if (s.ultima_ingestao) {
+    const u = s.ultima_ingestao;
+    $('st-ultima').textContent = `Última ingestão: ${new Date(u.quando).toLocaleString('pt-BR')} · ${u.inseridas} nova(s)`;
+  }
+  if (s.erro_storage) toast('Banco: ' + s.erro_storage, 8000);
+  return s;
+}
+
+function kpi(l, v, cls = '') { return `<div class="kpi"><div class="l">${l}</div><div class="v ${cls}">${v}</div></div>`; }
+
+async function carregarRelatorio() {
+  const params = new URLSearchParams({ mes: $('mes').value, meses: $('meses').value });
+  if ($('saldo').value) params.set('saldo_inicial', $('saldo').value);
+  const { resumo: r, projecao: p } = await api('/api/relatorio?' + params);
+  $('kpis').innerHTML = [
+    kpi('Entradas cadastradas', brl(r.entradas.cadastradas)),
+    kpi('Pix recebidos', brl(r.entradas.recebidas_pix)),
+    kpi('Gastos registrados', brl(r.gastos.registrados)),
+    kpi('Fixos planejados', brl(r.gastos.fixos_planejados)),
+    kpi('Pontuais planejados', brl(r.gastos.pontuais_planejados)),
+    kpi('Faturas vencendo', brl(r.faturas.total_vencendo)),
+    kpi('Saldo estimado do mês', brl(r.saldo_estimado), r.saldo_estimado < 0 ? 'neg' : 'pos'),
+  ].join('');
+  const cats = Object.entries(r.gastos.por_categoria);
+  $('cat').innerHTML = cats.length ? cats.map(([c, v]) => `<tr><td>${esc(c)}</td><td class="n">${brl(v)}</td></tr>`).join('') : '<tr><td class="mut">Sem gastos registrados</td></tr>';
+  $('fat').innerHTML = r.faturas.itens.length ? r.faturas.itens.map((f) => `<tr><td>${esc(f.conta)}</td><td>${esc(f.vencimento || '')}</td><td class="n">${brl(f.valor)}</td></tr>`).join('') : '<tr><td class="mut">Nenhuma fatura registrada</td></tr>';
+
+  $('proj-info').textContent = `saldo inicial ${brl(p.saldo_inicial)} · variável médio ${brl(p.media_variavel_mensal)}/mês`;
+  $('proj').innerHTML = '<tr><th>Mês</th><th class="n">Entradas</th><th class="n">Fixos</th><th class="n">Variáveis (média)</th><th class="n">Pontuais</th><th class="n">Resultado</th><th class="n">Saldo projetado</th></tr>' +
+    p.meses.map((m) => `<tr><td>${m.mes}</td><td class="n">${brl(m.entradas)}</td><td class="n">${brl(m.gastos_fixos)}</td><td class="n">${brl(m.gastos_variaveis_estimados)}</td>
+      <td class="n" title="${esc(m.pontuais.map((x) => x.descricao + ': ' + brl(x.valor)).join('\n'))}">${brl(m.gastos_pontuais)}</td>
+      <td class="n ${m.resultado_mes < 0 ? 'neg' : 'pos'}">${brl(m.resultado_mes)}</td><td class="n ${m.saldo_projetado < 0 ? 'neg' : ''}"><b>${brl(m.saldo_projetado)}</b></td></tr>`).join('');
+  $('proj-alerta').innerHTML = p.alerta ? `<div class="alert">${esc(p.alerta)}</div>` : '';
+
+  const labels = p.meses.map((m) => m.mes);
+  const datasets = [
+    { type: 'line', label: 'Saldo projetado', data: p.meses.map((m) => m.saldo_projetado), borderColor: '#3b5bdb', backgroundColor: '#3b5bdb', tension: .25, yAxisID: 'y' },
+    { type: 'bar', label: 'Entradas', data: p.meses.map((m) => m.entradas), backgroundColor: '#8ce99a' },
+    { type: 'bar', label: 'Saídas', data: p.meses.map((m) => -(m.gastos_fixos + m.gastos_variaveis_estimados + m.gastos_pontuais)), backgroundColor: '#ffa8a8' },
+  ];
+  if (chart) chart.destroy();
+  if (window.Chart) chart = new Chart($('chart'), { data: { labels, datasets }, options: { maintainAspectRatio: false, interaction: { mode: 'index', intersect: false }, plugins: { tooltip: { callbacks: { label: (c) => `${c.dataset.label}: ${brl(c.raw)}` } } }, scales: { y: { ticks: { callback: (v) => brl(v) } } } } });
+}
+
+async function carregarTransacoes() {
+  const tx = await api('/api/transacoes?mes=' + $('mes').value);
+  $('tx-count').textContent = `${tx.length} lançamento(s)`;
+  $('tx').innerHTML = '<tr><th>Data</th><th>Estabelecimento</th><th>Conta/cartão</th><th>Categoria</th><th>Tipo</th><th class="n">Valor</th><th></th></tr>' +
+    (tx.length ? tx.map((t) => `<tr><td>${esc(t.data)}</td><td>${esc(t.estabelecimento)}<div class="mut">${esc(t.origem_assunto || '')}</div></td><td>${esc(t.conta_ou_cartao)}</td>
+      <td><span class="tag">${esc(t.categoria)}</span></td><td>${esc(t.tipo)}</td><td class="n ${t.tipo === 'pix_recebido' ? 'pos' : ''}">${brl(t.valor)}</td>
+      <td>${t.id ? `<button class="dng" title="Excluir" onclick="delTx(${t.id})">✕</button>` : ''}</td></tr>`).join('') : '<tr><td colspan="7" class="mut">Nenhuma transação neste mês</td></tr>');
+}
+
+async function carregarPlanejamento() {
+  const items = await api('/api/planejamento');
+  $('plan').innerHTML = '<tr><th>Descrição</th><th>Tipo</th><th>Categoria</th><th>Frequência</th><th>Início</th><th>Fim</th><th class="n">Valor</th><th></th></tr>' +
+    (items.length ? items.map((p) => `<tr><td>${esc(p.descricao)}</td><td class="${p.direcao === 'entrada' ? 'pos' : 'neg'}">${p.direcao}</td><td><span class="tag">${esc(p.categoria)}</span></td>
+      <td>${p.recorrente ? 'Mensal' : 'Única'}</td><td>${esc(String(p.inicio).slice(0, 7))}</td><td>${esc(p.fim ? String(p.fim).slice(0, 7) : '—')}</td><td class="n">${brl(p.valor)}</td>
+      <td>${p.id ? `<button class="dng" title="Excluir" onclick="delPlan(${p.id})">✕</button>` : ''}</td></tr>`).join('') : '<tr><td colspan="8" class="mut">Cadastre salário, aluguel e custos da mudança para ver a projeção</td></tr>');
+}
+
+async function carregarTudo() {
+  localStorage.setItem('saldo', $('saldo').value);
+  await Promise.all([carregarRelatorio(), carregarTransacoes(), carregarPlanejamento()]).catch((e) => toast(e.message, 8000));
+}
+
+async function testarParser(salvar) {
+  const out = $('p-out'); out.style.display = 'block'; out.textContent = 'Consultando o Gemini...';
+  try {
+    const r = await api('/api/parse', { method: 'POST', body: { texto: $('p-texto').value, assunto: $('p-assunto').value, remetente: $('p-remetente').value, salvar } });
+    out.textContent = JSON.stringify(r.transacoes, null, 2) + (r.salvas ? `\n\nSalvas: ${r.salvas.inserted.length} | Duplicadas: ${r.salvas.skipped}` : '');
+    if (salvar) carregarTudo();
+  } catch (e) { out.textContent = 'Erro: ' + e.message; }
+}
+
+async function ingerir(dryRun) {
+  if (!dryRun && !confirm('Gravar as transações e marcar os e-mails como processados?')) return;
+  const out = $('i-out'); out.style.display = 'block'; out.textContent = 'Buscando e-mails e consultando o Gemini... (pode levar alguns minutos)';
+  document.querySelectorAll('button').forEach((b) => (b.disabled = true));
+  try {
+    const r = await api('/api/ingest', { method: 'POST', body: { dryRun } });
+    out.textContent = r.logs.join('\n') + (r.erros.length ? '\n\nErros:\n' + JSON.stringify(r.erros, null, 2) : '');
+    if (!dryRun) { carregarTudo(); carregarStatus(); }
+  } catch (e) { out.textContent = 'Erro: ' + e.message + (e.data?.logs ? '\n' + e.data.logs.join('\n') : ''); }
+  finally { document.querySelectorAll('button').forEach((b) => (b.disabled = false)); }
+}
+
+async function addPlan(ev) {
+  ev.preventDefault();
+  const body = Object.fromEntries(new FormData(ev.target));
+  body.recorrente = body.recorrente === 'true';
+  if (!body.fim) delete body.fim;
+  try { await api('/api/planejamento', { method: 'POST', body }); ev.target.reset(); ev.target.inicio.value = $('mes').value; toast('Adicionado'); carregarTudo(); }
+  catch (e) { toast(e.message, 6000); }
+}
+
+async function delPlan(id) { if (confirm('Excluir este item do planejamento?')) { await api('/api/planejamento?id=' + id, { method: 'DELETE' }).catch((e) => toast(e.message)); carregarTudo(); } }
+async function delTx(id) { if (confirm('Excluir esta transação?')) { await api('/api/transacoes?id=' + id, { method: 'DELETE' }).catch((e) => toast(e.message)); carregarTudo(); } }
+
+(async function init() {
+  $('mes').value = mesAtual;
+  $('saldo').value = localStorage.getItem('saldo') || '';
+  $('plan-form').inicio.value = mesAtual;
+  $('mes').addEventListener('change', carregarTudo);
+  if (new URLSearchParams(location.search).get('gmail') === 'conectado') { toast('Gmail conectado!'); history.replaceState(null, '', '/'); }
+  const cats = await api('/api/categorias').catch(() => []);
+  $('plan-cat').innerHTML = cats.map((c) => `<option ${c === 'Mudança' ? 'selected' : ''}>${esc(c)}</option>`).join('');
+  try { const s = await carregarStatus(); if (s.configurado.storage && !s.erro_storage) carregarTudo(); }
+  catch (e) { toast(e.message, 8000); }
+})();
+</script>
+</body>
+</html>

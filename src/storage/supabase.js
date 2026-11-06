@@ -35,10 +35,39 @@ export function createSupabaseStorage(client) {
       return data.map((t) => ({ ...t, valor: Number(t.valor) }));
     },
 
+    async deleteTransacao(id) {
+      const { error } = await db.from('transacoes').delete().eq('id', id);
+      if (error) throw new Error(`Supabase: ${error.message}`);
+    },
+
     async listPlanejamento() {
-      const { data, error } = await db.from('planejamento').select('*');
+      const { data, error } = await db.from('planejamento').select('*').order('inicio');
       if (error) throw new Error(`Supabase: ${error.message}`);
       return data.map((p) => ({ ...p, valor: Number(p.valor) }));
+    },
+
+    async addPlanejamento(item) {
+      const { data, error } = await db.from('planejamento').insert(item).select().single();
+      if (error) throw new Error(`Supabase: ${error.message}`);
+      return { ...data, valor: Number(data.valor) };
+    },
+
+    async deletePlanejamento(id) {
+      const { error } = await db.from('planejamento').delete().eq('id', id);
+      if (error) throw new Error(`Supabase: ${error.message}`);
+    },
+
+    async getConfig(chave) {
+      const { data, error } = await db.from('app_config').select('valor').eq('chave', chave).maybeSingle();
+      if (error) throw new Error(`Supabase: ${error.message}`);
+      return data?.valor ?? null;
+    },
+
+    async setConfig(chave, valor) {
+      const { error } = await db
+        .from('app_config')
+        .upsert({ chave, valor, atualizado_em: new Date().toISOString() });
+      if (error) throw new Error(`Supabase: ${error.message}`);
     },
   };
 }

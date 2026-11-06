@@ -8,6 +8,8 @@
     "node": ">=20.6"
   },
   "scripts": {
+    "start": "node src/server.js",
+    "dev": "STORAGE_BACKEND=memory node src/server.js",
     "auth:gmail": "node --env-file=.env scripts/auth-gmail.js",
     "ingest": "node --env-file=.env src/ingest.js",
     "ingest:dry": "node --env-file=.env src/ingest.js --dry-run",

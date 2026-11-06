@@ -11,15 +11,17 @@ Gmail (e-mails de bancos) ──> Gemini (JSON estruturado) ──> Supabase / S
 ```
 gastos-sync/
 ├── .env.example                  # todas as variáveis de ambiente
-├── .github/workflows/ingest.yml  # execução agendada (GitHub Actions, a cada 3h)
+├── .github/workflows/ingest.yml  # agenda: chama POST /api/ingest do app a cada 3h
+├── render.yaml                   # deploy no Render (plano free)
 ├── package.json
+├── public/index.html             # painel web
 ├── scripts/
 │   ├── auth-gmail.js             # gera o GOOGLE_REFRESH_TOKEN (uma vez)
 │   └── parse-file.js             # testa o parser com um e-mail salvo em arquivo
 ├── src/
 │   ├── config.js                 # env, categorias e tipos
 │   ├── ingest.js                 # pipeline: Gmail -> Gemini -> storage -> marca no Gmail
-│   ├── server.js                 # API HTTP de resumo/projeção
+│   ├── server.js                 # painel + API (protegidos por PAINEL_SENHA)
 │   ├── gmail/client.js           # busca, decodifica e rotula e-mails
 │   ├── parser/
 │   │   ├── prompt.js             # prompt + JSON Schema da resposta
@@ -28,7 +30,8 @@ gastos-sync/
 │   ├── storage/
 │   │   ├── index.js              # escolhe o backend (STORAGE_BACKEND)
 │   │   ├── supabase.js
-│   │   └── sheets.js
+│   │   ├── sheets.js
+│   │   └── memory.js             # dev local, sem banco
 │   └── summary/
 │       ├── forecast.js           # cálculos puros (resumo mensal e projeção)
 │       ├── service.js            # carrega dados do storage
@@ -51,9 +54,13 @@ cp .env.example .env
 ### 1. Google Cloud (Gmail)
 1. Crie um projeto em https://console.cloud.google.com e ative a **Gmail API** (e a **Google Sheets API** se for usar Sheets).
 2. *OAuth consent screen*: tipo External, adicione seu e-mail como *test user*. **Publique o app ("In production")**: em modo *Testing* o refresh token expira em 7 dias. Para uso pessoal não é preciso passar pela verificação; basta aceitar o aviso de "app não verificado".
-3. *Credentials > Create credentials > OAuth client ID*, tipo **Desktop app**. Copie o ID e o secret para `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
-4. Rode `npm run auth:gmail`, abra a URL, autorize e cole o `GOOGLE_REFRESH_TOKEN` exibido no `.env`.
-   (Com `STORAGE_BACKEND=sheets`, o mesmo token também recebe o escopo do Sheets.)
+3. *Credentials > Create credentials > OAuth client ID*, tipo **Web application**, com estes *Authorized redirect URIs*:
+   - `https://<seu-app>.onrender.com/oauth2callback` (painel publicado)
+   - `http://localhost:53682/oauth2callback` (script local `npm run auth:gmail`)
+
+   Copie o ID e o secret para `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
+4. Conecte o Gmail pelo botão **Conectar Gmail** do painel (o token fica salvo na tabela `app_config` do Supabase), ou rode `npm run auth:gmail` e cole o `GOOGLE_REFRESH_TOKEN` no `.env`.
+   (Com `STORAGE_BACKEND=sheets` é obrigatório o caminho do `.env`; o token também recebe o escopo do Sheets.)
 
 Escopo usado: `gmail.modify`, necessário apenas para aplicar o rótulo `gastos-sync/processado`; o script não apaga nem envia e-mails.
 
@@ -70,21 +77,29 @@ Crie uma chave em https://aistudio.google.com/apikey e defina `GEMINI_API_KEY`. 
 - `transacoes`: o cabeçalho é criado automaticamente.
 - `planejamento`: cabeçalho `descricao | direcao | valor | categoria | recorrente | inicio | fim` (direcao = `entrada`/`saida`, recorrente = `true`/`false`, datas `YYYY-MM-DD` ou `dd/mm/aaaa`).
 
-## Uso
+## Deploy grátis (Render + Supabase + GitHub Actions)
+
+1. Supabase: crie o projeto (região **East US / N. Virginia**, perto do Render) e rode `supabase/migrations/001_init.sql`.
+2. Render: *New > Blueprint*, escolha este repositório (usa o `render.yaml`) e preencha `PAINEL_SENHA`, `GEMINI_API_KEY`, `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET`.
+   O plano free dorme após 15 min sem acesso (o primeiro acesso leva cerca de 50s).
+3. Adicione `https://<seu-app>.onrender.com/oauth2callback` ao OAuth client do Google, abra o painel (usuário qualquer + `PAINEL_SENHA`) e clique em **Conectar Gmail**.
+4. GitHub: em *Settings > Secrets and variables > Actions*, crie `APP_URL` e `PAINEL_SENHA`. O workflow chama `POST /api/ingest` a cada 3h.
+
+Painel: resumo do mês, projeção com gráfico, transações (com exclusão), teste do parser colando um e-mail, ingestão manual (simulação ou real) e cadastro do planejamento.
+
+## Uso local
 
 ```bash
 npm run parse:file -- test/fixtures/nubank-compra.html   # testa só o Gemini
 npm run ingest:dry      # lê o Gmail e mostra o que seria salvo (não grava nem rotula)
 npm run ingest          # grava e rotula os e-mails processados
 npm run resumo -- --mes 2026-11 --meses 6 --saldo 15000
-npm run server          # GET /resumo, /projecao, / (ambos), /health
-                        # ex: /projecao?mes=2026-11&meses=12&saldo_inicial=15000
+npm run server          # painel em http://localhost:3000 (sem senha localmente)
+npm run dev             # painel com banco em memória, sem Supabase
 npm test
 ```
 
-### Agendamento
-- **GitHub Actions** (sem servidor): faça push para um repositório **privado**, cadastre os secrets usados em `.github/workflows/ingest.yml` e pronto: roda a cada 3h, com disparo manual disponível.
-- **cron local**: `0 */3 * * * cd /caminho/gastos-sync && npm run ingest >> ingest.log 2>&1`
+API (Basic Auth com `PAINEL_SENHA`): `GET /api/relatorio?mes=2026-11&meses=12&saldo_inicial=15000`, `GET /api/transacoes?mes=`, `GET|POST|DELETE /api/planejamento`, `POST /api/parse {texto, salvar}`, `POST /api/ingest {dryRun}`, `GET /api/status`.
 
 ## Como funciona
 

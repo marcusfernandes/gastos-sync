@@ -8,10 +8,16 @@ export function createOAuthClient() {
   return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 }
 
-export function createGmail() {
+export function createGmail(refreshToken = process.env.GOOGLE_REFRESH_TOKEN) {
+  if (!refreshToken) throw new Error('Gmail não conectado: defina GOOGLE_REFRESH_TOKEN ou use "Conectar Gmail" no painel.');
   const auth = createOAuthClient();
-  auth.setCredentials({ refresh_token: config.gmail.refreshToken });
+  auth.setCredentials({ refresh_token: refreshToken });
   return google.gmail({ version: 'v1', auth });
+}
+
+export async function resolveRefreshToken(storage) {
+  if (process.env.GOOGLE_REFRESH_TOKEN) return process.env.GOOGLE_REFRESH_TOKEN;
+  return storage?.getConfig ? storage.getConfig('google_refresh_token') : null;
 }
 
 function decodeBase64Url(data) {
@@ -71,7 +77,7 @@ export function buildQuery({ query, lookbackDays, processedLabel }) {
   return `${query} newer_than:${lookbackDays}d -label:${label}`;
 }
 
-export async function fetchBankEmails(gmail = createGmail()) {
+export async function fetchBankEmails(gmail) {
   const cfg = config.gmail;
   const q = buildQuery(cfg);
   const messages = [];

@@ -1,5 +1,7 @@
 name: Ingestão de gastos
 
+# Chama o endpoint de ingestão do app publicado (acorda o Render free se estiver dormindo).
+# Secrets necessários no repositório: APP_URL (ex: https://gastos-sync.onrender.com) e PAINEL_SENHA.
 on:
   schedule:
     - cron: '0 */3 * * *' # a cada 3 horas (UTC)
@@ -8,22 +10,17 @@ on:
 jobs:
   ingest:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
+    env:
+      APP_URL: ${{ secrets.APP_URL }}
+      PAINEL_SENHA: ${{ secrets.PAINEL_SENHA }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: node src/ingest.js
-        env:
-          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
-          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
-          GOOGLE_REFRESH_TOKEN: ${{ secrets.GOOGLE_REFRESH_TOKEN }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          STORAGE_BACKEND: ${{ vars.STORAGE_BACKEND || 'supabase' }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          GOOGLE_SHEETS_ID: ${{ secrets.GOOGLE_SHEETS_ID }}
-          GMAIL_QUERY: ${{ vars.GMAIL_QUERY }}
+      - name: Acordar o app
+        if: env.APP_URL != ''
+        run: curl -fsS --retry 6 --retry-delay 20 --retry-all-errors --max-time 60 "$APP_URL/health"
+      - name: Rodar ingestão
+        if: env.APP_URL != ''
+        run: |
+          curl -fsS --max-time 900 -u "actions:$PAINEL_SENHA" \
+            -H 'content-type: application/json' -d '{"dryRun":false}' \
+            "$APP_URL/api/ingest" | jq '{emails, transacoes, inseridas, duplicadas, falhas, erros}'

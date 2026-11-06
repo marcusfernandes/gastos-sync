@@ -72,6 +72,17 @@ export function createSheetsStorage(sheetsApi) {
       return desde ? all.filter((t) => t.data >= desde || (t.vencimento && t.vencimento >= desde)) : all;
     },
 
+    async addPlanejamento(item) {
+      await sheets.spreadsheets.values.append({
+        spreadsheetId,
+        range: 'planejamento!A1',
+        valueInputOption: 'RAW',
+        insertDataOption: 'INSERT_ROWS',
+        requestBody: { values: [PLANEJAMENTO_COLUNAS.map((c) => item[c] ?? '')] },
+      });
+      return item;
+    },
+
     async listPlanejamento() {
       const values = await read('planejamento!A:G').catch(() => []);
       return rowsToObjects(values, PLANEJAMENTO_COLUNAS).map((p) => ({
