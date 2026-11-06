@@ -106,7 +106,7 @@ Além dos 5 campos pedidos, `tipo` (`compra`, `pix_enviado`, `pix_recebido`, `de
 
 **Idempotência** em duas camadas:
 1. Os e-mails processados recebem o rótulo `gastos-sync/processado` e saem da busca seguinte. O rótulo só é aplicado **depois** de salvar; e-mails com erro no Gemini ficam para a próxima execução.
-2. `dedupe_key = sha256(data | valor | estabelecimento normalizado)`, com `UNIQUE` no Supabase (`upsert ... ignoreDuplicates`) e checagem prévia no Sheets. Pega reenvios e notificações duplicadas (ex.: push e e-mail do mesmo gasto).
+2. `dedupe_key = sha256(data | valor | estabelecimento normalizado)`, com `UNIQUE` no Supabase (`upsert ... ignoreDuplicates`) e checagem prévia no Sheets. Pega reenvios e notificações duplicadas (ex.: e-mail de "compra aprovada" e comprovante do mesmo gasto).
 
 > Limitação: duas compras idênticas no mesmo dia e no mesmo estabelecimento (ex.: dois cafés de R$ 8) viram uma só. Se isso incomodar, inclua `conta_ou_cartao` ou o horário na chave em `src/parser/normalize.js`.
 
