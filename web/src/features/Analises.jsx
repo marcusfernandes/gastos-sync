@@ -24,7 +24,7 @@ export function Analises() {
   return (
     <div className="grid gap-4">
       <PlanoCorte plano={dados.plano} />
-      <div className="grid items-start gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
         <Assinaturas a={dados.assinaturas} />
         <Conferencia c={dados.conferencia} aoMudar={() => { carregar(); recarregar(); }} />
       </div>
@@ -76,8 +76,8 @@ function PlanoCorte({ plano: inicial }) {
         <Button size="sm" onClick={gerar} disabled={gerando}><Sparkles className={cn(gerando && 'animate-pulse')} />{gerando ? 'Gerando...' : plano ? 'Gerar de novo' : 'Gerar plano'}</Button>
       </CardHeader>
       {plano && (
-        <CardContent className="grid gap-4 lg:grid-cols-5">
-          <div className="grid content-start gap-3 lg:col-span-3">
+        <CardContent className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+          <div className="grid min-w-0 grid-cols-1 content-start gap-3 lg:col-span-3">
             <p className="text-sm">{plano.resumo}</p>
             {plano.acoes.map((a, i) => (
               <div key={i} className="flex items-start gap-3 rounded-lg border px-3 py-2 text-sm">
@@ -89,11 +89,11 @@ function PlanoCorte({ plano: inicial }) {
                     <Button variant="link" size="xs" className="h-auto px-0" onClick={() => usarComoMeta(a)}><Target /> Usar como meta de {a.categoria}</Button>
                   )}
                 </div>
-                <span className="shrink-0 whitespace-nowrap font-medium tabular-nums text-emerald-600 dark:text-emerald-400">−{brl(a.economia_mensal)}/mês</span>
+                <span className="shrink-0 text-right font-medium tabular-nums text-emerald-600 dark:text-emerald-400"><span className="whitespace-nowrap">−{brl(a.economia_mensal)}</span><span className="text-xs">/mês</span></span>
               </div>
             ))}
           </div>
-          <div className="grid content-start gap-2 lg:col-span-2">
+          <div className="grid min-w-0 grid-cols-1 content-start gap-2 lg:col-span-2">
             <div className="text-sm">
               Economia de <span className="font-semibold text-emerald-600 dark:text-emerald-400">{brl(plano.economia_mensal)}/mês</span>
               {ultimo && <> · em {mesBR(ultimo.mes)}: {brl(ultimo.sem_plano)} → <span className="font-semibold">{brl(ultimo.com_plano)}</span></>}
