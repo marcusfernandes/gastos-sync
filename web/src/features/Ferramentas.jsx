@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FileUp, Landmark, Mail, Play, TestTube2 } from 'lucide-react';
+import { FileUp, Landmark, Mail, Play, Send, TestTube2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -96,6 +96,7 @@ export function Ferramentas() {
           <Saida texto={saidaIng} />
         </CardContent>
       </Card>
+      {status?.configurado?.telegram && <Telegram chats={status.telegram_chats || []} />}
       {status?.configurado?.pluggy && (
         <Card className={diasExpira != null && diasExpira <= 30 ? 'border-amber-500/50' : ''}>
           <CardHeader>
@@ -147,5 +148,34 @@ export function Ferramentas() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function Telegram({ chats }) {
+  const [enviando, setEnviando] = useState(false);
+  const testar = async () => {
+    setEnviando(true);
+    try {
+      const r = await api('/api/telegram/teste', { method: 'POST' });
+      toast.success(`Mensagem enviada para ${r.enviados} chat(s)`);
+    } catch (e) {
+      toast.error(e.message);
+    } finally {
+      setEnviando(false);
+    }
+  };
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base"><Send className="size-4 text-primary" /> Bot do Telegram</CardTitle>
+        <CardDescription>
+          {chats.length ? `Conectado: ${chats.join(', ')}.` : 'Nenhum chat conectado ainda.'} Para conectar, abra o bot e mande <code>/start</code> seguido da senha do painel.
+          Avisos de contas saem uma vez por dia, a partir das 8h, e o resumo semanal às segundas.
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Button variant="outline" size="sm" disabled={enviando || !chats.length} onClick={testar}><Send /> Enviar mensagem de teste</Button>
+      </CardContent>
+    </Card>
   );
 }

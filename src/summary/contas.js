@@ -1,4 +1,4 @@
-import { planejadoNoMes } from './forecast.js';
+import { addMeses, planejadoNoMes } from './forecast.js';
 import { normalizarTexto } from '../parser/normalize.js';
 
 const round = (n) => Math.round(n * 100) / 100;
@@ -92,3 +92,18 @@ export function contasDoMes(transacoes, planejamento, mes, { pagos = {}, dias = 
 }
 
 export const hojeBR = () => new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' });
+
+export async function lerJsonConfig(storage, chave) {
+  if (!storage.getConfig) return {};
+  return JSON.parse((await storage.getConfig(chave)) || '{}');
+}
+
+export async function carregarContas(storage, mes, hoje = hojeBR()) {
+  const [transacoes, planejamento, pagos, dias] = await Promise.all([
+    storage.listTransacoes({ desde: `${addMeses(mes, -3)}-01` }),
+    storage.listPlanejamento(),
+    lerJsonConfig(storage, 'contas_pagas'),
+    lerJsonConfig(storage, 'contas_dias'),
+  ]);
+  return contasDoMes(transacoes, planejamento, mes, { pagos: pagos[mes] || {}, dias, hoje });
+}

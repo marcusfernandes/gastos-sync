@@ -49,6 +49,10 @@ export function googleRedirectUri() {
 }
 
 export const config = {
+  get telegram() {
+    const token = process.env.TELEGRAM_BOT_TOKEN || null;
+    return { token, ativo: !!token, horaAlertas: int('TELEGRAM_HORA_ALERTAS', 8) };
+  },
   // Open Finance via Meu Pluggy (uso pessoal). Cada titular pode ter a própria aplicação:
   // PLUGGY_CLIENT_ID/SECRET/ITEM_IDS e, opcionalmente, PLUGGY_2_CLIENT_ID/SECRET/ITEM_IDS.
   get pluggy() {

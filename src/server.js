@@ -8,14 +8,18 @@ import { parseEmail } from './parser/gemini.js';
 import { chaveEstabelecimento, parseData } from './parser/normalize.js';
 import { contextoParser, createStorage } from './storage/index.js';
 import { addMeses } from './summary/forecast.js';
-import { contasDoMes, hojeBR } from './summary/contas.js';
+import { carregarContas, lerJsonConfig } from './summary/contas.js';
 import { gerarRelatorio, mesCorrente } from './summary/service.js';
 import { serieMensal } from './summary/historico.js';
 import { montarContexto, responderChat } from './chat.js';
 import { syncPluggy } from './pluggy/sync.js';
+import { createTelegram, segredoWebhook } from './telegram/api.js';
+import { chatsAutorizados, enviarAlertas, processarUpdate } from './telegram/bot.js';
+
+const telegram = config.telegram.ativo ? createTelegram(config.telegram.token) : null;
 
 const MES_RE = /^\d{4}-\d{2}$/;
-const PUBLIC_PATHS = new Set(['/health', '/privacidade']);
+const PUBLIC_PATHS = new Set(['/health', '/privacidade', '/telegram/webhook']);
 const DIST = new URL('../web/dist/', import.meta.url);
 const painelHtml = await readFile(new URL('index.html', DIST), 'utf8')
   .catch(() => readFile(new URL('../public/index.html', import.meta.url), 'utf8'));
@@ -135,20 +139,7 @@ async function lerSaldo(storage) {
   return JSON.parse((await storage.getConfig('saldo_atual')) || 'null') ?? { valor: null, atualizado_em: null };
 }
 
-async function lerJsonConfig(storage, chave) {
-  if (!storage.getConfig) return {};
-  return JSON.parse((await storage.getConfig(chave)) || '{}');
-}
-
-async function lerContas(storage, mes) {
-  const [transacoes, planejamento, pagos, dias] = await Promise.all([
-    storage.listTransacoes({ desde: `${addMeses(mes, -3)}-01` }),
-    storage.listPlanejamento(),
-    lerJsonConfig(storage, 'contas_pagas'),
-    lerJsonConfig(storage, 'contas_dias'),
-  ]);
-  return contasDoMes(transacoes, planejamento, mes, { pagos: pagos[mes] || {}, dias, hoje: hojeBR() });
-}
+const lerContas = (storage, mes) => carregarContas(storage, mes);
 
 async function status() {
   const configurado = {
@@ -159,6 +150,7 @@ async function status() {
     }[config.storageBackend] ?? hasEnv('SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'),
     google_oauth: hasEnv('GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'),
     pluggy: config.pluggy.ativo,
+    telegram: config.telegram.ativo,
   };
   const out = {
     storage_backend: config.storageBackend,
@@ -169,12 +161,14 @@ async function status() {
     gemini_model: config.gemini.model,
     erro_storage: null,
     pluggy: null,
+    telegram_chats: null,
   };
   if (configurado.storage) {
     try {
       const storage = await getStorage();
       out.gmail_conectado = Boolean(await resolveRefreshToken(storage));
       if (storage.getConfig) out.ultima_ingestao = JSON.parse((await storage.getConfig('ultima_ingestao')) || 'null');
+      if (configurado.telegram) out.telegram_chats = (await chatsAutorizados(storage)).map((c) => c.nome);
       if (storage.getConfig && configurado.pluggy) out.pluggy = JSON.parse((await storage.getConfig('pluggy_status')) || 'null');
     } catch (err) {
       out.erro_storage = err.message;
@@ -272,6 +266,27 @@ const routes = {
       storage: await getStorage(),
     });
     send(res, 200, rel);
+  },
+
+  'POST /telegram/webhook': async (req, res) => {
+    if (!telegram || req.headers['x-telegram-bot-api-secret-token'] !== segredoWebhook(config.telegram.token)) throw new HttpError(404, 'Não encontrado');
+    const update = await readJson(req);
+    send(res, 200, { ok: true });
+    const storage = await getStorage();
+    processarUpdate(update, { storage, tg: telegram }).catch((e) => {
+      console.error('Telegram:', e);
+      const chatId = update.message?.chat?.id;
+      if (chatId) telegram.enviar(chatId, `Não consegui processar: ${e.message}`).catch(() => {});
+    });
+  },
+
+  'POST /api/telegram/teste': async (req, res) => {
+    if (!telegram) throw new HttpError(400, 'Telegram não configurado (TELEGRAM_BOT_TOKEN)');
+    const storage = await getStorage();
+    const chats = await chatsAutorizados(storage);
+    if (!chats.length) throw new HttpError(400, 'Nenhum chat conectado. Mande /start <senha> para o bot.');
+    for (const c of chats) await telegram.enviar(c.id, 'Teste do gastos-sync: os avisos vão chegar aqui.');
+    send(res, 200, { enviados: chats.length });
   },
 
   'GET /api/contas': async (req, res, url) => {
@@ -452,6 +467,11 @@ const routes = {
         open_finance: openFinance && { novas: openFinance.novas, saldo: openFinance.saldo },
       };
       if (!dryRun && storage.setConfig) await storage.setConfig('ultima_ingestao', JSON.stringify(resumo));
+      if (!dryRun && telegram) {
+        await enviarAlertas({ storage, tg: telegram, log: (l) => logs.push(l) })
+          .then((a) => a.enviados && logs.push(`Telegram: ${a.enviados} aviso(s) enviado(s)`))
+          .catch((e) => logs.push(`! Avisos do Telegram falharam: ${e.message}`));
+      }
       send(res, 200, { ...resumo, logs, itens: dryRun ? r.transacoes : r.inserted, erros: r.falhas });
     } catch (err) {
       send(res, 500, { erro: err.message, logs });
@@ -527,4 +547,11 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(config.summary.port, () => {
   console.log(`Painel em http://localhost:${config.summary.port}`);
+  if (telegram && publicUrl()) {
+    telegram
+      .configurarWebhook(`${publicUrl()}/telegram/webhook`, segredoWebhook(config.telegram.token))
+      .then(() => telegram.configurarComandos())
+      .then(() => console.log('Telegram: webhook configurado'))
+      .catch((e) => console.error('Telegram:', e.message));
+  }
 });
