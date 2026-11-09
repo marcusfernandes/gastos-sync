@@ -18,7 +18,7 @@ const tx = [
 test('contas do mês: fixos ativos e uma linha por cartão, fatura prevalece sobre compras', () => {
   const r = contasDoMes(tx, plan, '2026-11', { hoje: '2026-11-10', dias: { [chaveFixo('Condomínio')]: 31 } });
   assert.deepEqual(r.contas.map((c) => [c.chave, c.valor, c.vencimento, c.status]), [
-    ['cartao:infinit', 6000, '2026-11-05', 'atrasada'],
+    ['cartao:bradesco infinite', 6000, '2026-11-05', 'atrasada'],
     ['cartao:nubank', 150.5, '2026-11-12', 'vence_logo'],
     ['fixo:condominio', 800, '2026-11-30', 'aberta'],
   ]);
@@ -28,10 +28,10 @@ test('contas do mês: fixos ativos e uma linha por cartão, fatura prevalece sob
 });
 
 test('contas pagas saem do em aberto', () => {
-  const r = contasDoMes(tx, plan, '2026-11', { hoje: '2026-11-10', pagos: { 'cartao:infinit': '2026-11-04T10:00:00Z' } });
-  assert.equal(r.contas.find((c) => c.chave === 'cartao:infinit').status, 'pago');
+  const r = contasDoMes(tx, plan, '2026-11', { hoje: '2026-11-10', pagos: { 'cartao:bradesco infinite': '2026-11-04T10:00:00Z' } });
+  assert.equal(r.contas.find((c) => c.chave === 'cartao:bradesco infinite').status, 'pago');
   assert.equal(r.pago, 6000);
   assert.equal(r.em_aberto, 950.5);
-  assert.equal(r.contas.at(-1).chave, 'cartao:infinit');
+  assert.equal(r.contas.at(-1).chave, 'cartao:bradesco infinite');
   assert.equal(r.contas.find((c) => c.chave === 'fixo:condominio').status, 'sem_data');
 });

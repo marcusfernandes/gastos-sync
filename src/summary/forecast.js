@@ -1,10 +1,11 @@
+import { cartaoDe } from '../parser/normalize.js';
 import { aporteNoMes } from './metas.js';
+
 export const GASTO_TIPOS = new Set(['compra', 'pix_enviado', 'debito', 'outro']);
 
 const round = (n) => Math.round(n * 100) / 100;
 const sum = (items) => round(items.reduce((acc, i) => acc + i.valor, 0));
 const mesDe = (date) => String(date).slice(0, 7);
-const cartaoDe = (t) => String(t.conta_ou_cartao || '').toLowerCase().split(/\s+/)[0];
 
 // Faturas de cartões cujas compras não chegam detalhadas (ex.: só o total veio da planilha
 // ou do e-mail) contam como gasto pelo valor total; as demais já entram compra a compra.
@@ -41,7 +42,7 @@ export function parcelamentos(transacoes) {
   const grupos = [];
   for (const t of transacoes.filter(parcelado)) {
     const base = t.estabelecimento.replace(/\s*\(parcela\s*\d+\s*\/\s*\d+\)\s*/i, '').trim().replace(/[\s\-–:,]+$/, '');
-    const banco = String(t.conta_ou_cartao || '').toLowerCase().split(/\s+/)[0];
+    const banco = cartaoDe(t);
     const inicio = addMeses(mesCobranca(t), 1 - t.parcela_atual);
     const g = grupos.find(
       (x) => x.banco === banco && x.t.parcelas_total === t.parcelas_total && x.inicio === inicio && Math.abs(x.t.valor - t.valor) <= Math.max(0.1, t.valor * 0.01),

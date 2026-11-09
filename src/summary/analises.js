@@ -1,9 +1,8 @@
-import { chaveEstabelecimento } from '../parser/normalize.js';
+import { cartaoDe, chaveEstabelecimento } from '../parser/normalize.js';
 import { GASTO_TIPOS, addMeses, mesPago, parcelado } from './forecast.js';
 
 const round = (n) => Math.round(n * 100) / 100;
 const mesDe = (d) => String(d).slice(0, 7);
-const cartaoDe = (t) => String(t.conta_ou_cartao || '').toLowerCase().split(/\s+/)[0];
 const gastos = (transacoes) => transacoes.filter((t) => GASTO_TIPOS.has(t.tipo));
 const mediana = (v) => {
   const s = [...v].sort((a, b) => a - b);

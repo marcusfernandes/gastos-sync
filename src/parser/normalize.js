@@ -19,6 +19,18 @@ export function parseData(raw, fallback) {
   return fallback ? fallback.slice(0, 10) : null;
 }
 
+// Identifica o cartão pelo banco (1ª palavra); onde a casa tem mais de um cartão no mesmo banco,
+// pelo produto. Assim "Infinit" (planilha), "Bradesco Visa Infinite" (e-mail/Open Finance) são o mesmo.
+const PRODUTOS = [
+  [/\binfinit/, 'bradesco infinite'],
+  [/\bnanquim\b/, 'bradesco nanquim'],
+];
+export function cartaoDe(t) {
+  const n = normalizarTexto(typeof t === 'string' ? t : t?.conta_ou_cartao);
+  for (const [re, id] of PRODUTOS) if (re.test(n)) return id;
+  return n.split(' ')[0];
+}
+
 export function normalizarTexto(s) {
   return String(s || '')
     .normalize('NFD')

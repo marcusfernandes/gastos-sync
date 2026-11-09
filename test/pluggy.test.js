@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bancoDoItem, mapFatura, mapTransacao, nomeConta, semEstornos } from '../src/pluggy/map.js';
+import { bancoDoItem, mapFatura, mapTransacao, nomeConta, semEstornos, titularPrincipal } from '../src/pluggy/map.js';
+import { cartaoDe } from '../src/parser/normalize.js';
+import { faturasSemDetalhe } from '../src/summary/forecast.js';
 import { semDuplicatasCruzadas } from '../src/dedupe.js';
 import { syncPluggy } from '../src/pluggy/sync.js';
 import { createMemoryStorage } from '../src/storage/memory.js';
@@ -129,4 +131,125 @@ test('estorno no cartão anula a compra; pagamento da fatura não', () => {
     { id: '4', amount: -152.28, description: 'Pagamento recebido', category: 'Credit card payment' },
   ];
   assert.deepEqual(semEstornos(txs).map((t) => t.id), ['2', '3', '4']);
+});
+
+test('dois cartões Bradesco da casa ficam separados e batem com planilha/e-mail', () => {
+  const infinite = { type: 'CREDIT', name: 'VISA INFINITE', owner: 'REBECCA B' };
+  const nanquim = { type: 'CREDIT', name: 'ELO NANQUIM', owner: 'MARCUS V' };
+  assert.equal(nomeConta(infinite, 'Bradesco'), 'Bradesco Visa Infinite');
+  assert.equal(nomeConta(nanquim, 'Bradesco'), 'Bradesco Nanquim');
+  assert.equal(cartaoDe('Infinit'), cartaoDe('Bradesco Visa Infinite'));
+  assert.notEqual(cartaoDe('Bradesco Nanquim'), cartaoDe('Bradesco Visa Infinite'));
+  assert.equal(cartaoDe('Itaú PDA'), cartaoDe('Itaú'));
+  const tx = [
+    { tipo: 'fatura', conta_ou_cartao: 'Infinit', valor: 5000, data: '2026-10-10', vencimento: '2026-10-10' },
+    { tipo: 'fatura', conta_ou_cartao: 'Bradesco Nanquim', valor: 900, data: '2026-10-10', vencimento: '2026-10-10' },
+    { tipo: 'compra', conta_ou_cartao: 'Bradesco Visa Infinite', valor: 100, data: '2026-09-20', vencimento: '2026-10-10' },
+  ];
+  assert.deepEqual(faturasSemDetalhe(tx).map((t) => t.conta_ou_cartao), ['Bradesco Nanquim']);
+});
+
+test('contas de outro titular levam o primeiro nome dele', () => {
+  const contas = [
+    { type: 'BANK', subtype: 'CHECKING_ACCOUNT', owner: 'MARCUS VINICIUS' },
+    { type: 'BANK', subtype: 'CHECKING_ACCOUNT', owner: 'Marcus Vinícius' },
+    { type: 'BANK', subtype: 'CHECKING_ACCOUNT', owner: 'REBECCA BARRETO' },
+  ];
+  assert.equal(titularPrincipal(contas), 'Marcus');
+  assert.equal(nomeConta(contas[2], 'Bradesco', { outroTitular: true }), 'Bradesco conta Rebecca');
+  assert.equal(nomeConta(contas[0], 'Bradesco'), 'Bradesco conta');
+});
+
+test('paginação da Pluggy anexa o `next` (query string) ao caminho', async () => {
+  const { createPluggy } = await import('../src/pluggy/client.js');
+  const urls = [];
+  const fetchFn = async (url) => {
+    urls.push(url);
+    if (url.endsWith('/auth')) return { ok: true, json: async () => ({ apiKey: 'k' }) };
+    const pag2 = url.includes('after=abc');
+    return { ok: true, json: async () => ({ results: [{ id: pag2 ? 2 : 1 }], next: pag2 ? null : '?accountId=a&after=abc%3D%3D' }) };
+  };
+  const p = createPluggy({ clientId: 'i', clientSecret: 's' }, fetchFn);
+  assert.deepEqual((await p.transacoes('a', { from: '2026-01-01' })).map((t) => t.id), [1, 2]);
+  assert.equal(urls.at(-1), 'https://api.pluggy.ai/v2/transactions?accountId=a&after=abc%3D%3D');
+});
+
+test('contas correntes: tira transferência da casa, pagamento de fatura e fixo já planejado', async () => {
+  const { semMovimentosDuplicados } = await import('../src/pluggy/movimentos.js');
+  const t = (conta_ou_cartao, tipo, valor, data, estabelecimento = 'x') => ({ conta_ou_cartao, tipo, valor, data, estabelecimento });
+  const linhas = [
+    t('Caixa conta', 'pix_enviado', 1200, '2026-10-09'),
+    { ...t('Bradesco conta Rebecca', 'pix_recebido', 1200, '2026-10-09'), entre_titulares: true },
+    { ...t('Bradesco conta Rebecca', 'pix_enviado', 246.36, '2026-10-01'), entre_titulares: true },
+    t('Caixa conta', 'pix_enviado', 459.49, '2026-10-22'),
+    t('Caixa conta', 'pix_enviado', 2800, '2026-10-02'),
+    t('Caixa conta', 'debito', 2921.29, '2026-10-19'),
+    t('Caixa conta', 'pix_enviado', 149.9, '2026-10-19', 'loja'),
+  ];
+  const faturas = [{ tipo: 'fatura', conta_ou_cartao: 'Mercado Pago', valor: 459.49, vencimento: '2026-10-25' }];
+  const planejamento = [{ id: 1, descricao: 'Apê', direcao: 'saida', valor: 2900, recorrente: true, inicio: '2026-01-01' }];
+  const r = semMovimentosDuplicados(linhas, { faturas, planejamento });
+  assert.deepEqual(r.linhas.map((l) => l.valor), [2800, 149.9]);
+  assert.deepEqual(r.removidos.map((l) => l.motivo), [
+    'transferência entre contas da casa',
+    'transferência entre contas da casa',
+    'pagamento da fatura Mercado Pago',
+    'Pix entre contas do casal',
+    'gasto fixo já planejado: Apê',
+  ]);
+});
+
+test('Pix entre o casal não entra e previsão de fatura segue o padrão do banco', async () => {
+  const { nomesDosTitulares, deslocamentoPrevisao } = await import('../src/pluggy/map.js');
+  const contas = [{ owner: 'MARCUS VINICIUS FERNANDES' }, { owner: 'REBECCA BARRETO DE MATOS' }];
+  const titulares = nomesDosTitulares(contas);
+  assert.deepEqual(titulares, ['marcus vinicius', 'rebecca barreto']);
+  const banco = { type: 'BANK' };
+  const pix = (description, amount) => ({ id: description, date: '2026-10-01', amount, description, operationType: 'PIX' });
+  assert.equal(mapTransacao(pix('PIX ENVIADO - DES  MARCUS VINICIUS FERNA 01/10', -246.36), banco, { nome: 'b', titulares, hoje: '2026-11-01' }).entre_titulares, true);
+  const amazon = mapTransacao(pix('PIX QR CODE DINAMICO - DES  AMAZON', -76.94), banco, { nome: 'b', titulares, hoje: '2026-11-01' });
+  assert.equal(amazon.tipo, 'pix_enviado');
+  assert.equal(amazon.entre_titulares, undefined);
+  assert.equal(mapTransacao(pix('GASTOS CARTAO DE CREDITO', -694.9), banco, { nome: 'b', hoje: '2026-11-01' }), null);
+
+  const faturasPorId = new Map([['b1', { id: 'b1', dueDate: '2026-11-10' }]]);
+  const cartao = { type: 'CREDIT', creditData: { balanceDueDate: '2026-11-10' } };
+  const faturada = { id: 1, date: '2026-10-01', amount: 10, description: 'A', creditCardMetadata: { billId: 'b1', billForecastDate: '2026-10-01' } };
+  const aberta = { id: 2, date: '2026-11-01', amount: 20, description: 'B', creditCardMetadata: { billForecastDate: '2026-11-01' } };
+  const desloc = deslocamentoPrevisao([faturada, aberta], faturasPorId);
+  assert.equal(desloc, 1);
+  assert.equal(mapTransacao(aberta, cartao, { nome: 'c', faturasPorId, deslocamento: desloc, hoje: '2026-11-05' }).vencimento, '2026-12-10');
+});
+
+test('devolução de Pix anula a ida e fatura incompleta mantém o total', async () => {
+  const { semDevolucoes, faturasIncompletas } = await import('../src/pluggy/map.js');
+  const txs = [
+    { id: 1, date: '2026-10-07', amount: -86.96, description: 'DEB PIX QR COD DIN' },
+    { id: 2, date: '2026-10-07', amount: 86.96, description: 'DEVOLUCAO PIX RECEBIDO' },
+    { id: 3, date: '2026-10-07', amount: -10, description: 'DEB PIX' },
+  ];
+  assert.deepEqual(semDevolucoes(txs).map((t) => t.id), [3]);
+  const linhas = [{ fatura_id: 'a', valor: 4101.51 }, { fatura_id: 'b', valor: 459.77 }];
+  const faturas = [{ id: 'a', totalAmount: 4966.99 }, { id: 'b', totalAmount: 459.49 }];
+  assert.deepEqual([...faturasIncompletas(linhas, faturas)], ['a']);
+});
+
+test('compra da fatura em PDF sem "X/Y" casa com a do Open Finance e ganha as parcelas', async () => {
+  const storage = createMemoryStorage();
+  await storage.saveTransacoes([
+    { data: '2026-04-01', valor: 225.95, estabelecimento: 'AZUL SEGUROS', conta_ou_cartao: 'Bradesco Infinite', categoria: 'Outros', tipo: 'compra', vencimento: '2026-11-10', dedupe_key: 'pdf1', origem_email_id: 'gmail:1' },
+  ]);
+  const pluggy = {
+    item: async () => ({ status: 'UPDATED', connector: { name: 'MeuPluggy' } }),
+    contas: async () => [{ id: 'c', type: 'CREDIT', name: 'VISA INFINITE', marketingName: 'Bradesco Visa Infinite', owner: 'REBECCA B' }],
+    faturas: async () => [{ id: 'b', dueDate: '2026-11-10', totalAmount: 225.95 }],
+    transacoes: async () => [
+      { id: 't', date: '2026-11-01', amount: 225.95, description: 'AZUL SEGUROS 07/10', creditCardMetadata: { billId: 'b', purchaseDate: '2026-04-02', installmentNumber: 7, totalInstallments: 10 } },
+    ],
+  };
+  const r = await syncPluggy({ storage, conjuntos: [{ pluggy, itemIds: ['i'] }], dias: 30, categorizar: async () => new Map(), log: () => {} });
+  assert.deepEqual(r.transacoes.map((x) => x.tipo), ['fatura']);
+  const [t] = (await storage.listTransacoes()).filter((x) => x.tipo === 'compra');
+  assert.equal(t.parcelas_total, 10);
+  assert.equal(t.parcela_atual, 7);
 });

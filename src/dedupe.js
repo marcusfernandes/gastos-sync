@@ -1,9 +1,9 @@
-import { normalizarTexto } from './parser/normalize.js';
+import { cartaoDe } from './parser/normalize.js';
 
 // A mesma movimentação pode chegar por e-mail/fatura e pelo Open Finance, com nomes diferentes.
 // Considera repetida quando é do mesmo banco, mesmo valor e data próxima (ou mesma fatura).
 const DIAS = 5;
-const banco = (t) => normalizarTexto(t.conta_ou_cartao).split(' ')[0];
+const banco = (t) => cartaoDe(t);
 const ehPluggy = (t) => String(t.origem_email_id || '').startsWith('pluggy:');
 const dias = (a, b) => Math.abs(Date.parse(a) - Date.parse(b)) / 864e5;
 const MOVIMENTO = new Set(['compra', 'debito', 'pix_enviado', 'pix_recebido']);
@@ -21,7 +21,8 @@ function mesma(n, e) {
   if (Math.abs(n.valor - e.valor) > 0.02) return false;
   const mes = (t) => t.vencimento?.slice(0, 7);
   if (mes(n) && mes(e) && mes(n) !== mes(e)) return false;
-  if (n.parcelas_total || e.parcelas_total) {
+  // Só compara parcelas quando as duas fontes trazem (a fatura em PDF às vezes vem sem o "X/Y").
+  if (n.parcelas_total && e.parcelas_total) {
     // Cada banco data a parcela de um jeito (data da compra ou da fatura): vale o número e a fatura.
     if (n.parcela_atual !== e.parcela_atual || n.parcelas_total !== e.parcelas_total) return false;
     if (mes(n) && mes(e)) return true;

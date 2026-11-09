@@ -3,7 +3,8 @@ import { chaveEstabelecimento } from '../parser/normalize.js';
 import { categorizarEstabelecimentos } from '../parser/gemini.js';
 import { contextoParser } from '../storage/index.js';
 import { createPluggy } from './client.js';
-import { bancoDoItem, mapFatura, mapTransacao, nomeConta, semEstornos } from './map.js';
+import { bancoDoItem, mapFatura, mapTransacao, deslocamentoPrevisao, faturasIncompletas, nomeConta, nomesDosTitulares, semDevolucoes, semEstornos, titularDe, titularPrincipal } from './map.js';
+import { semMovimentosDuplicados } from './movimentos.js';
 import { semDuplicatasCruzadas } from '../dedupe.js';
 
 const LOTE_IA = 150;
@@ -26,48 +27,61 @@ export async function syncPluggy({
   const itens = [];
   let saldo = null;
 
+  const lidos = [];
   for (const { pluggy, itemIds } of conjuntos)
-    for (const itemId of itemIds) {
-      const item = await pluggy.item(itemId);
-      const contas = await pluggy.contas(itemId);
-      const banco = bancoDoItem(item, contas);
-      const variosCartoes = contas.filter((c) => c.type === 'CREDIT').length > 1;
-      const info = {
-        id: itemId,
-        banco,
-        status: item.status,
-        erro: item.error?.code || null,
-        atualizado_em: item.lastUpdatedAt || item.updatedAt || null,
-        consentimento_expira: item.consentExpiresAt || null,
-        contas: [],
-      };
-      for (const conta of contas) {
-        const nome = nomeConta(conta, banco, { variosCartoes });
-        const faturas = conta.type === 'CREDIT' ? await pluggy.faturas(conta.id).catch(() => []) : [];
-        const faturasPorId = new Map(faturas.map((f) => [f.id, f]));
-        // Compras de cartão contam pela fatura: busca antes de `from` para ter as faturas completas.
-        const txs = await pluggy.transacoes(conta.id, { from: addDias(from, -45) });
-        const antes = linhas.length;
-        for (const tx of conta.type === 'CREDIT' ? semEstornos(txs) : txs) {
-          const t = mapTransacao(tx, conta, { nome, faturasPorId, hoje });
-          if (t && (t.vencimento || t.data) >= from) linhas.push(t);
-        }
-        for (const f of faturas) if (String(f.dueDate).slice(0, 10) >= from) linhas.push(mapFatura(f, nome));
-        if (conta.type === 'BANK') saldo = Math.round(((saldo ?? 0) + Number(conta.balance || 0)) * 100) / 100;
-        info.contas.push({
-          nome,
-          tipo: conta.type,
-          saldo: conta.balance,
-          lidas: txs.length,
-          novas: linhas.length - antes,
-        });
-        log(`- ${nome}: ${txs.length} movimentação(ões), ${linhas.length - antes} aproveitada(s)`);
-      }
-      itens.push(info);
-    }
+    for (const itemId of [...new Set(itemIds.map((i) => i.trim()).filter(Boolean))]) lidos.push({ pluggy, itemId, item: await pluggy.item(itemId), contas: await pluggy.contas(itemId) });
+  const principal = titularPrincipal(lidos.flatMap((l) => l.contas));
+  const titulares = nomesDosTitulares(lidos.flatMap((l) => l.contas));
 
-  const validas = linhas.filter(Boolean);
+  for (const { pluggy, itemId, item, contas } of lidos) {
+    const banco = bancoDoItem(item, contas);
+    const variosCartoes = contas.filter((c) => c.type === 'CREDIT').length > 1;
+    const info = {
+      id: itemId,
+      banco,
+      status: item.status,
+      erro: item.error?.code || null,
+      atualizado_em: item.lastUpdatedAt || item.updatedAt || null,
+      consentimento_expira: item.consentExpiresAt || null,
+      contas: [],
+    };
+    for (const conta of contas) {
+      const nome = nomeConta(conta, banco, { variosCartoes, outroTitular: Boolean(principal && conta.owner && titularDe(conta) !== principal) });
+      const faturas = conta.type === 'CREDIT' ? await pluggy.faturas(conta.id).catch(() => []) : [];
+      const faturasPorId = new Map(faturas.map((f) => [f.id, f]));
+      // Compras de cartão contam pela fatura: busca antes de `from` para ter as faturas completas.
+      const txs = await pluggy.transacoes(conta.id, { from: addDias(from, -45) });
+      const antes = linhas.length;
+      const deslocamento = deslocamentoPrevisao(txs, faturasPorId);
+      const daConta = [];
+      for (const tx of conta.type === 'CREDIT' ? semEstornos(txs) : semDevolucoes(txs)) {
+        const t = mapTransacao(tx, conta, { nome, faturasPorId, deslocamento, titulares, hoje });
+        if (t) daConta.push(t);
+      }
+      const incompletas = faturasIncompletas(daConta, faturas);
+      if (incompletas.size) log(`- ${nome}: ${incompletas.size} fatura(s) sem todas as compras na API, fica valendo o total`);
+      for (const t of daConta) if (!incompletas.has(t.fatura_id) && (t.vencimento || t.data) >= from) linhas.push(t);
+      for (const f of faturas) if (String(f.dueDate).slice(0, 10) >= from) linhas.push(mapFatura(f, nome));
+      if (conta.type === 'BANK') saldo = Math.round(((saldo ?? 0) + Number(conta.balance || 0)) * 100) / 100;
+      info.contas.push({
+        nome,
+        tipo: conta.type,
+        saldo: conta.balance,
+        lidas: txs.length,
+        novas: linhas.length - antes,
+      });
+      log(`- ${nome}: ${txs.length} movimentação(ões), ${linhas.length - antes} aproveitada(s)`);
+    }
+    itens.push(info);
+  }
+
   const gravadas = await storage.listTransacoes({ desde: addDias(from, -90) });
+  const filtro = semMovimentosDuplicados(linhas.filter(Boolean), {
+    planejamento: (await storage.listPlanejamento?.()) || [],
+    faturas: gravadas.filter((t) => t.tipo === 'fatura'),
+  });
+  for (const r of filtro.removidos) log(`- fora: ${r.data} ${r.conta_ou_cartao} R$ ${r.valor} ${r.estabelecimento} (${r.motivo})`);
+  const validas = filtro.linhas;
   const existentes = new Set(gravadas.map((t) => t.dedupe_key));
   const cruzado = semDuplicatasCruzadas(
     validas.filter((t) => !existentes.has(t.dedupe_key)),
@@ -100,10 +114,15 @@ export async function syncPluggy({
     novas: novas.length,
     ignoradas: validas.length - novas.length,
     repetidas: cruzado.repetidas,
+    fora: filtro.removidos,
     transacoes: novas,
   };
   if (dryRun) return resultado;
   const { inserted } = await storage.saveTransacoes(novas);
+  // A fatura do e-mail às vezes vem sem o "X/Y": completa com as parcelas do Open Finance para a projeção.
+  for (const { nova, existente } of cruzado.repetidas)
+    if (nova.parcelas_total > 1 && !existente.parcelas_total && existente.id && storage.updateTransacoes)
+      await storage.updateTransacoes([existente.id], { parcela_atual: nova.parcela_atual, parcelas_total: nova.parcelas_total });
   resultado.novas = inserted.length;
   const agora = new Date().toISOString();
   const anterior = JSON.parse((await storage.getConfig?.('saldo_atual')) || 'null');

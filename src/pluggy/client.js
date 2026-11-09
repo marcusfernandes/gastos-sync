@@ -21,7 +21,11 @@ export function createPluggy({ clientId, clientSecret } = config.pluggy, fetchFn
 
   async function get(path, params = {}) {
     const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null && v !== ''));
-    const r = await fetchFn(`${BASE}${path}${qs.size ? `?${qs}` : ''}`, { headers: { 'X-API-KEY': await chave() } });
+    return getUrl(path, `${path}${qs.size ? `?${qs}` : ''}`);
+  }
+
+  async function getUrl(path, caminho) {
+    const r = await fetchFn(`${BASE}${caminho}`, { headers: { 'X-API-KEY': await chave() } });
     if (!r.ok) throw new Error(`Pluggy ${path} ${r.status}: ${(await r.text()).slice(0, 200)}`);
     return r.json();
   }
@@ -32,11 +36,14 @@ export function createPluggy({ clientId, clientSecret } = config.pluggy, fetchFn
     contas: async (itemId) => (await get('/accounts', { itemId })).results || [],
     transacoes: async (accountId, { from, to } = {}) => {
       const out = [];
-      for (let after; ; ) {
-        const r = await get('/v2/transactions', { accountId, dateFrom: from, dateTo: to, after });
+      // `next` já vem como query string completa ("?accountId=…&after=…"): só anexar ao caminho.
+      let r = await get('/v2/transactions', { accountId, dateFrom: from, dateTo: to });
+      for (;;) {
         out.push(...(r.results || []));
         if (!r.next) return out;
-        after = r.next;
+        r = String(r.next).startsWith('?')
+          ? await getUrl('/v2/transactions', `/v2/transactions${r.next}`)
+          : await get('/v2/transactions', { accountId, dateFrom: from, dateTo: to, after: r.next });
       }
     },
     faturas: async (accountId) => (await get('/bills', { accountId })).results || [],

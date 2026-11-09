@@ -1,9 +1,8 @@
+import { cartaoDe, normalizarTexto } from '../parser/normalize.js';
 import { addMeses, planejadoNoMes } from './forecast.js';
-import { normalizarTexto } from '../parser/normalize.js';
 
 const round = (n) => Math.round(n * 100) / 100;
 const mesDe = (d) => String(d).slice(0, 7);
-const cartaoDe = (t) => String(t.conta_ou_cartao || '').toLowerCase().split(/\s+/)[0];
 const DIA_MS = 86400000;
 
 export const chaveFixo = (descricao) => `fixo:${normalizarTexto(descricao)}`;
