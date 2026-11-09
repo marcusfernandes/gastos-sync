@@ -2,6 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 import { config } from './config.js';
 import { addMeses, projecao } from './summary/forecast.js';
 import { serieMensal } from './summary/historico.js';
+import { resumoMetas } from './summary/metas.js';
 
 let client;
 const getClient = () => (client ??= new GoogleGenAI({ apiKey: config.gemini.apiKey }));
@@ -9,13 +10,14 @@ const mesDe = (d) => String(d).slice(0, 7);
 const round = (n) => Math.round(n * 100) / 100;
 
 // Resumo compacto dos dados financeiros para o modelo responder perguntas.
-export function montarContexto({ transacoes, planejamento, mesAtual, saldoAtual = 0 }) {
+export function montarContexto({ transacoes, planejamento, mesAtual, saldoAtual = 0, metas = [] }) {
   const serie = serieMensal(transacoes, planejamento, mesAtual, 6);
   const proj = projecao(transacoes, planejamento, {
     mesAtual,
     meses: 12,
     saldoInicial: saldoAtual,
     mesesHistorico: config.summary.mesesHistoricoVariavel,
+    metas,
   });
   const desde = addMeses(mesAtual, -3);
   const porLoja = {};
@@ -36,6 +38,7 @@ export function montarContexto({ transacoes, planejamento, mesAtual, saldoAtual 
     hoje: new Date().toISOString().slice(0, 10),
     mes_atual: mesAtual,
     saldo_atual_informado: saldoAtual,
+    metas_de_poupanca: resumoMetas(metas, mesAtual).itens.map(({ nome, alvo, guardado, prazo, aporte_mensal }) => ({ nome, alvo, guardado, prazo, aporte_mensal })),
     ultimos_6_meses: serie,
     receitas_e_fixos_vigentes: vigentes.map((p) => ({
       descricao: p.descricao, responsavel: p.responsavel, direcao: p.direcao, valor: p.valor, categoria: p.categoria, desde: mesDe(p.inicio), ate: p.fim ? mesDe(p.fim) : null,

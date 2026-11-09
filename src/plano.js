@@ -38,8 +38,8 @@ const schema = (categorias) => ({
   required: ['resumo', 'acoes'],
 });
 
-export function dadosDoPlano({ transacoes, planejamento, mesAtual, saldoAtual, limites = {}, meses = 6 }) {
-  const proj = projecao(transacoes, planejamento, { mesAtual, meses, saldoInicial: saldoAtual, mesesHistorico: config.summary.mesesHistoricoVariavel });
+export function dadosDoPlano({ transacoes, planejamento, mesAtual, saldoAtual, limites = {}, meses = 6, metas = [] }) {
+  const proj = projecao(transacoes, planejamento, { mesAtual, meses, saldoInicial: saldoAtual, mesesHistorico: config.summary.mesesHistoricoVariavel, metas });
   const atual = {};
   for (const t of transacoes) {
     if (!['compra', 'pix_enviado', 'debito', 'outro'].includes(t.tipo) || String(t.vencimento || t.data).slice(0, 7) !== mesAtual) continue;
@@ -56,6 +56,7 @@ export function dadosDoPlano({ transacoes, planejamento, mesAtual, saldoAtual, l
       gastos_por_categoria_mes_atual: atual,
       media_por_categoria_3_meses: mediaPorCategoria(transacoes, mesAtual),
       metas_atuais: limites,
+      metas_de_poupanca_mensal: proj.meses.map((m) => ({ mes: m.mes, reservas: m.reservas })).filter((m) => m.reservas),
       assinaturas: assinaturas(transacoes, mesAtual).itens.map((a) => ({ nome: a.estabelecimento, valor: a.valor, categoria: a.categoria })),
       parcelamentos_em_aberto: proj.parcelamentos.map((p) => ({ compra: p.estabelecimento, parcela: p.valor_parcela, termina: p.mes_fim })),
       fixos: planejamento.filter((p) => p.direcao === 'saida' && p.recorrente && !p.fim).map((p) => ({ descricao: p.descricao, valor: p.valor })),

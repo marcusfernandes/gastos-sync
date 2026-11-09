@@ -34,6 +34,8 @@ export function createTelegram(token, fetchImpl = fetch) {
           { command: 'resumo', description: 'Resumo do mês' },
           { command: 'contas', description: 'Contas do mês e o que falta pagar' },
           { command: 'semana', description: 'Resumo da semana' },
+          { command: 'revisar', description: 'Caixa de revisão do mês' },
+          { command: 'fechamento', description: 'Fechamento do mês passado' },
           { command: 'ajuda', description: 'Como registrar gastos' },
         ],
       }),

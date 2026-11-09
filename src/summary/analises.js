@@ -163,3 +163,23 @@ export function conferencia(transacoes, mes) {
 
   return { mes, faturas, duplicadas, fora_do_padrao: foraDoPadrao };
 }
+
+// Fila do que entrou no mês e merece um olho: categoria "Outros", possíveis repetidas e valores altos.
+export function caixaRevisao(transacoes, mes, revisados = new Set()) {
+  const conf = conferencia(transacoes, mes);
+  const itens = [];
+  const vistos = new Set();
+  const add = (t, tipo, motivo, extra = {}) => {
+    if (revisados.has(String(t.id)) || vistos.has(t.id)) return;
+    vistos.add(t.id);
+    itens.push({ tipo, motivo, transacao: t, ...extra });
+  };
+  for (const [x, y] of conf.duplicadas) add(y, 'repetida', `Parece repetir ${x.estabelecimento} de ${x.data.split('-').reverse().join('/')}`, { par: x });
+  for (const t of conf.fora_do_padrao) add(t, 'alto', `${t.vezes}× o gasto típico de ${t.categoria}`);
+  for (const t of gastos(transacoes).filter((t) => mesPago(t) === mes)) {
+    if (t.categoria === 'Outros') add(t, 'outros', 'Sem categoria definida');
+    else if (t.valor >= 1000 && !parcelado(t)) add(t, 'alto', 'Valor alto');
+  }
+  const ordem = { repetida: 0, alto: 1, outros: 2 };
+  return itens.sort((a, b) => ordem[a.tipo] - ordem[b.tipo] || b.transacao.valor - a.transacao.valor);
+}

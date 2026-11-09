@@ -13,6 +13,9 @@ import { brl, dataBR, dataHoraBR, eixoBRL, mesBR, mesBRCurto } from '@/lib/forma
 import { useDados } from '@/lib/dados';
 import { useDialogs } from '@/lib/dialogs';
 import { useOrcamento } from '@/features/Orcamento';
+import { CaixaRevisao } from '@/features/Revisao';
+import { Fechamento } from '@/features/Fechamento';
+import { GastosPorPessoa } from '@/features/Pessoas';
 import { cn } from '@/lib/utils';
 
 export function Analises() {
@@ -22,7 +25,10 @@ export function Analises() {
   useEffect(() => { carregar(); }, [carregar, versao]);
   if (!dados) return <div className="grid gap-4"><Skeleton className="h-64" /><Skeleton className="h-64" /></div>;
   return (
-    <div className="grid gap-4">
+    <div className="grid grid-cols-1 gap-4">
+      <CaixaRevisao />
+      <Fechamento />
+      <GastosPorPessoa />
       <PlanoCorte plano={dados.plano} />
       <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
         <Assinaturas a={dados.assinaturas} />

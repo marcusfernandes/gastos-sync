@@ -7,7 +7,10 @@ import { montarContexto, responderChat } from '../chat.js';
 import { addMeses } from '../summary/forecast.js';
 import { gerarRelatorio } from '../summary/service.js';
 import { carregarContas, hojeBR, lerJsonConfig } from '../summary/contas.js';
-import { assinaturas, conferencia, orcamentoDoMes } from '../summary/analises.js';
+import { assinaturas, caixaRevisao, conferencia, orcamentoDoMes } from '../summary/analises.js';
+import { lerRevisados, marcarRevisados } from '../summary/revisao.js';
+import { lerMetas } from '../summary/metas.js';
+import { gerarFechamento, textoFechamento } from '../summary/fechamento.js';
 
 const brl = (n) => Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const dataBR = (d) => (d ? d.split('-').reverse().join('/') : '');
@@ -114,7 +117,7 @@ const AJUDA = `Para registrar um gasto, mande uma mensagem curta:
 Também dá para mandar a foto de um comprovante ou nota fiscal.
 Qualquer outra pergunta vai para a IA, ex.: "onde mais gastamos este mês?"
 
-Comandos: /resumo, /contas, /semana, /ajuda`;
+Comandos: /resumo, /contas, /semana, /revisar, /fechamento, /ajuda`;
 
 export async function textoResumo(storage, mes = hojeBR().slice(0, 7)) {
   const { resumo: r, projecao: p } = await gerarRelatorio({ mes, meses: 3, saldoInicial: await saldoAtual(storage), storage });
@@ -205,12 +208,13 @@ const historicos = new Map();
 
 async function conversar(storage, tg, chatId, texto, deps) {
   const mesAtual = hojeBR().slice(0, 7);
-  const [transacoes, planejamento, saldo] = await Promise.all([
+  const [transacoes, planejamento, saldo, metas] = await Promise.all([
     storage.listTransacoes({ desde: `${addMeses(mesAtual, -7)}-01` }),
     storage.listPlanejamento(),
     saldoAtual(storage),
+    lerMetas(storage),
   ]);
-  const contexto = montarContexto({ transacoes, planejamento, mesAtual, saldoAtual: saldo });
+  const contexto = montarContexto({ transacoes, planejamento, mesAtual, saldoAtual: saldo, metas });
   const hist = historicos.get(chatId) || [];
   hist.push({ role: 'user', texto });
   const resposta = await (deps.responderChat || responderChat)({ mensagens: hist, contexto });
@@ -243,6 +247,12 @@ export async function processarUpdate(update, { storage, tg, ...deps }) {
     const chatId = q.message?.chat?.id;
     if (!(await chatsAutorizados(storage)).some((c) => c.id === chatId)) return tg.responderCallback(q.id, 'Chat não autorizado');
     const [acao, msgId] = String(q.data || '').split(':');
+    if (acao === 'rok' || acao === 'rdel') {
+      if (acao === 'rdel') await storage.deleteTransacao(msgId);
+      else await marcarRevisados(storage, [msgId]);
+      await tg.editarTeclado(chatId, q.message.message_id);
+      return tg.responderCallback(q.id, acao === 'rdel' ? 'Apagado' : 'Conferido');
+    }
     if (acao !== 'del') return tg.responderCallback(q.id);
     const origem = `telegram:${chatId}:${msgId}`;
     const recentes = await storage.listTransacoes({ desde: addDias(hojeBR(), -120) });
@@ -276,6 +286,8 @@ export async function processarUpdate(update, { storage, tg, ...deps }) {
   if (comando === 'resumo') return tg.enviar(chatId, await textoResumo(storage));
   if (comando === 'contas') return tg.enviar(chatId, await textoContas(storage));
   if (comando === 'semana') return tg.enviar(chatId, await textoSemana(storage));
+  if (comando === 'revisar') return enviarRevisao(storage, tg, chatId);
+  if (comando === 'fechamento') return tg.enviar(chatId, await textoDoFechamento(storage, addMeses(hojeBR().slice(0, 7), -1)));
   if (comando === 'sair') {
     await storage.setConfig('telegram_chats', JSON.stringify({ chats: chats.filter((c) => c.id !== chatId) }));
     return tg.enviar(chatId, 'Chat desconectado. Para voltar, mande /start e a senha.');
@@ -293,6 +305,22 @@ export async function processarUpdate(update, { storage, tg, ...deps }) {
   if (lancamento) return salvar(storage, tg, chatId, msg.message_id, [await categorizar(storage, lancamento, deps)]);
   if (!texto) return null;
   return conversar(storage, tg, chatId, texto, deps);
+}
+
+export const textoDoFechamento = async (storage, mes) => textoFechamento(await gerarFechamento(storage, mes), { brl, mesBR });
+
+async function enviarRevisao(storage, tg, chatId) {
+  const mes = hojeBR().slice(0, 7);
+  const [transacoes, revisados] = await Promise.all([storage.listTransacoes({ desde: `${addMeses(mes, -7)}-01` }), lerRevisados(storage)]);
+  const itens = caixaRevisao(transacoes, mes, revisados);
+  if (!itens.length) return tg.enviar(chatId, 'Caixa de revisão vazia. Nada para conferir neste mês.');
+  await tg.enviar(chatId, `${itens.length} ${itens.length > 1 ? 'itens' : 'item'} para conferir${itens.length > 5 ? ' (mostrando 5)' : ''}:`);
+  for (const { transacao: t, motivo } of itens.slice(0, 5)) {
+    await tg.enviar(chatId, `${t.estabelecimento} — ${brl(t.valor)}\n${dataBR(t.data)} · ${t.conta_ou_cartao} · ${t.categoria}\n${motivo}`, {
+      reply_markup: { inline_keyboard: [[{ text: '✓ Está certo', callback_data: `rok:${t.id}` }, { text: '🗑 Apagar', callback_data: `rdel:${t.id}` }]] },
+    });
+  }
+  return null;
 }
 
 // Metas passando de 80%/100%, assinaturas mais caras e compras repetidas: cada aviso sai uma vez por mês.
@@ -324,6 +352,21 @@ export async function avisosDoMes(storage, mes, estado) {
   return linhas.length ? ['Avisos do mês:', ...linhas, '', 'Detalhes no painel, em Análises.'].join('\n') : null;
 }
 
+async function novosParaRevisar(storage, mes, estado) {
+  const [transacoes, revisados] = await Promise.all([storage.listTransacoes({ desde: `${addMeses(mes, -7)}-01` }), lerRevisados(storage)]);
+  const avisados = new Set(estado.revisao_avisados || []);
+  const novos = caixaRevisao(transacoes, mes, revisados).filter((i) => !avisados.has(String(i.transacao.id)) && i.tipo !== 'repetida');
+  if (!novos.length) return null;
+  estado.revisao_avisados = [...avisados, ...novos.map((i) => String(i.transacao.id))].slice(-1000);
+  return [
+    `🔎 ${novos.length} ${novos.length > 1 ? 'lançamentos novos' : 'lançamento novo'} para conferir:`,
+    ...novos.slice(0, 5).map(({ transacao: t, motivo }) => `• ${t.estabelecimento} ${brl(t.valor)} — ${motivo}`),
+    ...(novos.length > 5 ? [`… e mais ${novos.length - 5}`] : []),
+    '',
+    'Mande /revisar para confirmar ou apagar aqui mesmo.',
+  ].join('\n');
+}
+
 const horaBR = (agora) => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', hour: 'numeric', hourCycle: 'h23' }).format(agora));
 const diaSemanaBR = (agora) => new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', weekday: 'short' }).format(agora);
 
@@ -350,6 +393,15 @@ export async function enviarAlertas({ storage, tg, agora = new Date(), hora = co
       ].join('\n'));
     }
   }
+  if (Number(hoje.slice(8)) <= 3) {
+    const fechado = addMeses(hoje.slice(0, 7), -1);
+    if (estado.fechamento !== fechado) {
+      estado.fechamento = fechado;
+      mensagens.push(await textoDoFechamento(storage, fechado));
+    }
+  }
+  const revisar = await novosParaRevisar(storage, hoje.slice(0, 7), estado);
+  if (revisar) mensagens.push(revisar);
   const avisos = await avisosDoMes(storage, hoje.slice(0, 7), estado);
   if (avisos) mensagens.push(avisos);
 

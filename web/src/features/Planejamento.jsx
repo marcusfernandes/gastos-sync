@@ -15,6 +15,7 @@ import { brl, hojeMes, mesBR, mesDe, parseValor } from '@/lib/format';
 import { useDados } from '@/lib/dados';
 import { useDialogs } from '@/lib/dialogs';
 import { cn } from '@/lib/utils';
+import { Metas } from '@/features/Metas';
 
 const ehReceita = (p) => p.direcao === 'entrada' && p.recorrente;
 
@@ -40,6 +41,7 @@ export function Planejamento() {
   return (
     <div className="grid gap-4">
       <Receitas />
+      <Metas />
       <OutrosItens />
     </div>
   );

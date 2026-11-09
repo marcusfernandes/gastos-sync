@@ -13,6 +13,7 @@ import { addMeses, brl, dataBR, mesBR, mesDe } from '@/lib/format';
 import { useDados, useMudarCategoria } from '@/lib/dados';
 import { useDialogs } from '@/lib/dialogs';
 import { cn } from '@/lib/utils';
+import { CASAL, PessoaSelect, usePessoas } from '@/features/Pessoas';
 
 const TIPOS = { compra: 'Compra', pix_enviado: 'Pix enviado', pix_recebido: 'Pix recebido', debito: 'Débito', fatura: 'Fatura', outro: 'Outro' };
 
@@ -35,12 +36,15 @@ export function Transacoes() {
   const [busca, setBusca] = useState('');
   const [tipo, setTipo] = useState('todos');
   const [cat, setCat] = useState('todas');
+  const [quem, setQuem] = useState('todos');
+  const pessoas = usePessoas();
 
   const lista = useMemo(() => transacoes.filter((t) =>
     (tipo === 'todos' || t.tipo === tipo)
     && (cat === 'todas' || t.categoria === cat)
+    && (quem === 'todos' || (t.responsavel || CASAL) === quem)
     && (!busca || `${t.estabelecimento} ${t.conta_ou_cartao} ${t.origem_assunto || ''}`.toLowerCase().includes(busca.toLowerCase())),
-  ), [transacoes, busca, tipo, cat]);
+  ), [transacoes, busca, tipo, cat, quem]);
   const total = lista.filter((t) => !['pix_recebido', 'fatura'].includes(t.tipo)).reduce((a, t) => a + t.valor, 0);
 
   const excluir = async (t) => {
@@ -75,6 +79,13 @@ export function Transacoes() {
               {categorias.map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
             </SelectContent>
           </Select>
+          <Select value={quem} onValueChange={setQuem}>
+            <SelectTrigger className="h-9 w-full sm:w-36"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todas as pessoas</SelectItem>
+              {[...pessoas, CASAL].map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+            </SelectContent>
+          </Select>
         </div>
         <div className="max-h-[36rem] overflow-auto rounded-lg border">
           <Table>
@@ -85,13 +96,14 @@ export function Transacoes() {
                 <TableHead>Categoria</TableHead>
                 <TableHead className="hidden lg:table-cell">Tipo</TableHead>
                 <TableHead className="hidden md:table-cell">Pagamento</TableHead>
+                <TableHead className="hidden sm:table-cell">De quem</TableHead>
                 <TableHead className="text-right">Valor</TableHead>
                 <TableHead className="w-10" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {lista.length === 0 && (
-                <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">Nenhuma transação encontrada</TableCell></TableRow>
+                <TableRow><TableCell colSpan={8} className="py-8 text-center text-muted-foreground">Nenhuma transação encontrada</TableCell></TableRow>
               )}
               {lista.map((t) => (
                 <TableRow key={t.id ?? t.dedupe_key}>
@@ -109,6 +121,7 @@ export function Transacoes() {
                   </TableCell>
                   <TableCell className="hidden lg:table-cell"><Badge variant="outline">{TIPOS[t.tipo] || t.tipo}</Badge></TableCell>
                   <TableCell className="hidden md:table-cell"><Pagamento t={t} /></TableCell>
+                  <TableCell className="hidden sm:table-cell">{t.id && <PessoaSelect t={t} onSalvo={recarregar} />}</TableCell>
                   <TableCell className={cn('text-right font-medium whitespace-nowrap tabular-nums', t.tipo === 'pix_recebido' && 'text-emerald-600 dark:text-emerald-400')}>{brl(t.valor)}</TableCell>
                   <TableCell>
                     {t.id && <Button variant="ghost" size="icon-sm" onClick={() => excluir(t)} aria-label="Excluir"><Trash2 className="text-muted-foreground" /></Button>}

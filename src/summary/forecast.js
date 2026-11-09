@@ -1,3 +1,4 @@
+import { aporteNoMes } from './metas.js';
 export const GASTO_TIPOS = new Set(['compra', 'pix_enviado', 'debito', 'outro']);
 
 const round = (n) => Math.round(n * 100) / 100;
@@ -151,7 +152,7 @@ function parcelasEmFaturas(transacoes, faturas) {
   return round(total);
 }
 
-export function projecao(transacoes, planejamento, { mesAtual, meses = 6, saldoInicial = 0, mesesHistorico = 3 }) {
+export function projecao(transacoes, planejamento, { mesAtual, meses = 6, saldoInicial = 0, mesesHistorico = 3, metas = [] }) {
   const variavel = mediaVariavel(transacoes, planejamento, mesAtual, mesesHistorico);
   const abertos = parcelamentos(transacoes);
   let saldo = saldoInicial;
@@ -164,7 +165,8 @@ export function projecao(transacoes, planejamento, { mesAtual, meses = 6, saldoI
     const pontuais = plan.filter((p) => p.direcao === 'saida' && !p.recorrente);
     const parcelas = round(parcelasNoMes(abertos, mes).reduce((acc, p) => acc + p.valor_parcela, 0));
     const saidas = round(fixos + sum(pontuais) + variavel + parcelas);
-    saldo = round(saldo + entradas - saidas);
+    const reservas = aporteNoMes(metas, mesAtual, mes);
+    saldo = round(saldo + entradas - saidas - reservas);
     linhas.push({
       mes,
       entradas,
@@ -173,7 +175,8 @@ export function projecao(transacoes, planejamento, { mesAtual, meses = 6, saldoI
       parcelas,
       gastos_pontuais: sum(pontuais),
       pontuais: pontuais.map((p) => ({ descricao: p.descricao, valor: p.valor })),
-      resultado_mes: round(entradas - saidas),
+      reservas,
+      resultado_mes: round(entradas - saidas - reservas),
       saldo_projetado: saldo,
     });
   }

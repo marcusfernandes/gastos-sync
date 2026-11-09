@@ -281,6 +281,7 @@ const saidasConfig = {
   gastos_variaveis_estimados: { label: 'Variáveis (est.)', color: 'var(--chart-5)' },
   parcelas: { label: 'Parcelas', color: 'var(--chart-1)' },
   gastos_pontuais: { label: 'Pontuais', color: 'var(--chart-4)' },
+  reservas: { label: 'Guardar (metas)', color: 'var(--chart-2)' },
 };
 
 function SaidasProjetadas({ proj }) {

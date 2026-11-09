@@ -73,12 +73,14 @@ function Projecao({ p }) {
     saidas: m.gastos_fixos + m.gastos_variaveis_estimados + m.parcelas + m.gastos_pontuais,
     saldo: m.saldo_projetado,
   }));
+  const temReservas = p.meses.some((m) => m.reservas);
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-base">Projeção de saldo</CardTitle>
         <CardDescription>
           Parte de {brl(p.saldo_inicial)} · gastos variáveis estimados em {brl(p.media_variavel_mensal)}/mês (média dos últimos meses)
+          {temReservas && ' · já desconta o que guardar para as metas de poupança'}
         </CardDescription>
       </CardHeader>
       <CardContent className="grid gap-4">
@@ -110,6 +112,7 @@ function Projecao({ p }) {
                 <TableHead className="hidden text-right md:table-cell">Variáveis (est.)</TableHead>
                 <TableHead className="hidden text-right md:table-cell">Parcelas</TableHead>
                 <TableHead className="hidden text-right lg:table-cell">Pontuais</TableHead>
+                {temReservas && <TableHead className="hidden text-right md:table-cell">Guardar</TableHead>}
                 <TableHead className="text-right">Resultado</TableHead>
                 <TableHead className="text-right">Saldo</TableHead>
               </TableRow>
@@ -123,6 +126,7 @@ function Projecao({ p }) {
                   <TableCell className="hidden text-right tabular-nums md:table-cell">{brl(m.gastos_variaveis_estimados)}</TableCell>
                   <TableCell className="hidden text-right tabular-nums md:table-cell">{brl(m.parcelas)}</TableCell>
                   <TableCell className="hidden text-right tabular-nums lg:table-cell" title={m.pontuais.map((x) => `${x.descricao}: ${brl(x.valor)}`).join('\n')}>{brl(m.gastos_pontuais)}</TableCell>
+                  {temReservas && <TableCell className="hidden text-right tabular-nums md:table-cell">{brl(m.reservas)}</TableCell>}
                   <TableCell className={cn('text-right tabular-nums', corValor(m.resultado_mes))}>{brl(m.resultado_mes)}</TableCell>
                   <TableCell className={cn('text-right font-medium tabular-nums', corValor(m.saldo_projetado))}>{brl(m.saldo_projetado)}</TableCell>
                 </TableRow>

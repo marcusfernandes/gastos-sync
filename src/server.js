@@ -13,7 +13,11 @@ import { gerarRelatorio, mesCorrente } from './summary/service.js';
 import { serieMensal } from './summary/historico.js';
 import { montarContexto, responderChat } from './chat.js';
 import { gerarPlano } from './plano.js';
-import { assinaturas, conferencia, orcamentoDoMes } from './summary/analises.js';
+import { assinaturas, caixaRevisao, conferencia, orcamentoDoMes } from './summary/analises.js';
+import { lerRevisados, marcarRevisados } from './summary/revisao.js';
+import { lerMetas, resumoMetas, validarMetas } from './summary/metas.js';
+import { gerarFechamento } from './summary/fechamento.js';
+import { CASAL, gastosPorPessoa, pessoasDe } from './summary/pessoas.js';
 import { syncPluggy } from './pluggy/sync.js';
 import { createTelegram, segredoWebhook } from './telegram/api.js';
 import { chatsAutorizados, enviarAlertas, processarUpdate } from './telegram/bot.js';
@@ -255,12 +259,13 @@ const routes = {
     if (!Array.isArray(mensagens) || !mensagens.length) throw new HttpError(400, 'mensagens é obrigatório');
     const storage = await getStorage();
     const mesAtual = mesCorrente();
-    const [transacoes, planejamento, saldo] = await Promise.all([
+    const [transacoes, planejamento, saldo, metas] = await Promise.all([
       storage.listTransacoes({ desde: `${addMeses(mesAtual, -7)}-01` }),
       storage.listPlanejamento(),
       lerSaldo(storage),
+      lerMetas(storage),
     ]);
-    const contexto = montarContexto({ transacoes, planejamento, mesAtual, saldoAtual: saldo.valor ?? 0 });
+    const contexto = montarContexto({ transacoes, planejamento, mesAtual, saldoAtual: saldo.valor ?? 0, metas });
     send(res, 200, { resposta: await responderChat({ mensagens, contexto }) });
   },
 
@@ -368,17 +373,65 @@ const routes = {
     send(res, 200, { assinaturas: assinaturas(transacoes, mes), conferencia: conferencia(transacoes, mes), plano: plano.acoes ? plano : null });
   },
 
+  'GET /api/metas': async (req, res) => {
+    send(res, 200, resumoMetas(await lerMetas(await getStorage()), mesCorrente()));
+  },
+
+  // { metas: [{ id?, nome, alvo, guardado, prazo: 'YYYY-MM' }] } substitui a lista inteira.
+  'PUT /api/metas': async (req, res) => {
+    const storage = await getStorage();
+    exigir(storage, 'setConfig');
+    const { metas } = await readJson(req);
+    let validas;
+    try { validas = validarMetas(metas); } catch (e) { throw new HttpError(400, e.message); }
+    await storage.setConfig('metas_poupanca', JSON.stringify(validas));
+    send(res, 200, resumoMetas(validas, mesCorrente()));
+  },
+
+  'GET /api/fechamento': async (req, res, url) => {
+    const mes = url.searchParams.get('mes') || addMeses(mesCorrente(), -1);
+    if (!MES_RE.test(mes)) throw new HttpError(400, 'mes deve ser YYYY-MM');
+    send(res, 200, await gerarFechamento(await getStorage(), mes));
+  },
+
+  'GET /api/pessoas': async (req, res, url) => {
+    const mes = url.searchParams.get('mes') || mesCorrente();
+    if (!MES_RE.test(mes)) throw new HttpError(400, 'mes deve ser YYYY-MM');
+    const storage = await getStorage();
+    const [transacoes, planejamento] = await Promise.all([dadosAnalise(storage, mes, 1), storage.listPlanejamento()]);
+    send(res, 200, gastosPorPessoa(transacoes, planejamento, mes));
+  },
+
+  'GET /api/revisao': async (req, res, url) => {
+    const mes = url.searchParams.get('mes') || mesCorrente();
+    if (!MES_RE.test(mes)) throw new HttpError(400, 'mes deve ser YYYY-MM');
+    const storage = await getStorage();
+    const [transacoes, revisados] = await Promise.all([dadosAnalise(storage, mes), lerRevisados(storage)]);
+    send(res, 200, { mes, itens: caixaRevisao(transacoes, mes, revisados) });
+  },
+
+  // { ids: [...] } marca como conferido (sai da caixa de revisão).
+  'POST /api/revisao/ok': async (req, res) => {
+    const storage = await getStorage();
+    exigir(storage, 'setConfig');
+    const { ids } = await readJson(req);
+    if (!Array.isArray(ids) || !ids.length) throw new HttpError(400, 'ids é obrigatório');
+    await marcarRevisados(storage, ids);
+    send(res, 200, { ok: true });
+  },
+
   'POST /api/plano-corte': async (req, res) => {
     const storage = await getStorage();
     const mesAtual = mesCorrente();
-    const [transacoes, planejamento, saldo, limites, categorias] = await Promise.all([
+    const [transacoes, planejamento, saldo, limites, categorias, metas] = await Promise.all([
       dadosAnalise(storage, mesAtual),
       storage.listPlanejamento(),
       lerSaldo(storage),
       lerJsonConfig(storage, 'orcamentos'),
       categoriasValidas(storage),
+      lerMetas(storage),
     ]);
-    const plano = await gerarPlano({ transacoes, planejamento, mesAtual, saldoAtual: saldo.valor ?? 0, limites, categorias });
+    const plano = await gerarPlano({ transacoes, planejamento, mesAtual, saldoAtual: saldo.valor ?? 0, limites, categorias, metas });
     if (storage.setConfig) await storage.setConfig('plano_corte', JSON.stringify(plano));
     send(res, 200, plano);
   },
@@ -402,6 +455,13 @@ const routes = {
     exigir(storage, 'updateTransacoes');
     const id = url.searchParams.get('id');
     const body = await readJson(req);
+    if ('responsavel' in body && body.categoria === undefined) {
+      const pessoas = pessoasDe(await storage.listPlanejamento());
+      const responsavel = body.responsavel === CASAL ? null : body.responsavel || null;
+      if (responsavel && !pessoas.includes(responsavel)) throw new HttpError(400, 'Pessoa inválida');
+      await storage.updateTransacoes([id], { responsavel });
+      return send(res, 200, { atualizadas: 1 });
+    }
     if (!(await categoriasValidas(storage)).includes(body.categoria)) throw new HttpError(400, 'Categoria inválida');
     const todas = await storage.listTransacoes();
     const alvo = todas.find((t) => String(t.id) === String(id));

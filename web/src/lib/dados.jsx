@@ -87,6 +87,7 @@ export function useMudarCategoria() {
       const r = await api(`/api/transacoes?id=${id}`, { method: 'PATCH', body: { categoria: nova, lembrar: lembrar === 'sim' } });
       toast.success(`${r.atualizadas} lançamento(s) atualizado(s)`);
       recarregar();
+      return true;
     } catch (e) {
       toast.error(e.message);
     }
