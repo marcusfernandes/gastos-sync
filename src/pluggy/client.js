@@ -26,19 +26,19 @@ export function createPluggy({ clientId, clientSecret } = config.pluggy, fetchFn
     return r.json();
   }
 
-  async function paginado(path, params) {
-    const out = [];
-    for (let page = 1; ; page++) {
-      const r = await get(path, { ...params, page, pageSize: 500 });
-      out.push(...(r.results || []));
-      if (!r.totalPages || page >= r.totalPages) return out;
-    }
-  }
 
   return {
     item: (id) => get(`/items/${id}`),
     contas: async (itemId) => (await get('/accounts', { itemId })).results || [],
-    transacoes: (accountId, { from, to } = {}) => paginado('/transactions', { accountId, from, to }),
+    transacoes: async (accountId, { from, to } = {}) => {
+      const out = [];
+      for (let after; ; ) {
+        const r = await get('/v2/transactions', { accountId, dateFrom: from, dateTo: to, after });
+        out.push(...(r.results || []));
+        if (!r.next) return out;
+        after = r.next;
+      }
+    },
     faturas: async (accountId) => (await get('/bills', { accountId })).results || [],
   };
 }

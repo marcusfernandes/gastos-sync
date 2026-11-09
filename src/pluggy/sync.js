@@ -3,9 +3,11 @@ import { chaveEstabelecimento } from '../parser/normalize.js';
 import { categorizarEstabelecimentos } from '../parser/gemini.js';
 import { contextoParser } from '../storage/index.js';
 import { createPluggy } from './client.js';
-import { mapFatura, mapTransacao, nomeConta } from './map.js';
+import { bancoDoItem, mapFatura, mapTransacao, nomeConta, semEstornos } from './map.js';
+import { semDuplicatasCruzadas } from '../dedupe.js';
 
 const LOTE_IA = 150;
+const addDias = (d, n) => new Date(Date.parse(d) + n * 864e5).toISOString().slice(0, 10);
 
 export async function syncPluggy({
   storage,
@@ -27,41 +29,52 @@ export async function syncPluggy({
   for (const { pluggy, itemIds } of conjuntos)
     for (const itemId of itemIds) {
       const item = await pluggy.item(itemId);
+      const contas = await pluggy.contas(itemId);
+      const banco = bancoDoItem(item, contas);
+      const variosCartoes = contas.filter((c) => c.type === 'CREDIT').length > 1;
       const info = {
         id: itemId,
-        banco: item.connector?.name || itemId,
+        banco,
         status: item.status,
         erro: item.error?.code || null,
         atualizado_em: item.lastUpdatedAt || item.updatedAt || null,
         consentimento_expira: item.consentExpiresAt || null,
         contas: [],
       };
-      for (const conta of await pluggy.contas(itemId)) {
+      for (const conta of contas) {
+        const nome = nomeConta(conta, banco, { variosCartoes });
         const faturas = conta.type === 'CREDIT' ? await pluggy.faturas(conta.id).catch(() => []) : [];
         const faturasPorId = new Map(faturas.map((f) => [f.id, f]));
-        const txs = await pluggy.transacoes(conta.id, { from });
+        // Compras de cartão contam pela fatura: busca antes de `from` para ter as faturas completas.
+        const txs = await pluggy.transacoes(conta.id, { from: addDias(from, -45) });
         const antes = linhas.length;
-        for (const tx of txs) {
-          const t = mapTransacao(tx, conta, { item, faturasPorId, hoje });
-          if (t) linhas.push(t);
+        for (const tx of conta.type === 'CREDIT' ? semEstornos(txs) : txs) {
+          const t = mapTransacao(tx, conta, { nome, faturasPorId, hoje });
+          if (t && (t.vencimento || t.data) >= from) linhas.push(t);
         }
-        for (const f of faturas) if (String(f.dueDate).slice(0, 10) >= from) linhas.push(mapFatura(f, conta, item));
+        for (const f of faturas) if (String(f.dueDate).slice(0, 10) >= from) linhas.push(mapFatura(f, nome));
         if (conta.type === 'BANK') saldo = Math.round(((saldo ?? 0) + Number(conta.balance || 0)) * 100) / 100;
         info.contas.push({
-          nome: nomeConta(conta, item),
+          nome,
           tipo: conta.type,
           saldo: conta.balance,
           lidas: txs.length,
           novas: linhas.length - antes,
         });
-        log(`- ${nomeConta(conta, item)}: ${txs.length} movimentação(ões), ${linhas.length - antes} aproveitada(s)`);
+        log(`- ${nome}: ${txs.length} movimentação(ões), ${linhas.length - antes} aproveitada(s)`);
       }
       itens.push(info);
     }
 
   const validas = linhas.filter(Boolean);
-  const existentes = new Set((await storage.listTransacoes({ desde: from })).map((t) => t.dedupe_key));
-  const novas = validas.filter((t) => !existentes.has(t.dedupe_key));
+  const gravadas = await storage.listTransacoes({ desde: addDias(from, -90) });
+  const existentes = new Set(gravadas.map((t) => t.dedupe_key));
+  const cruzado = semDuplicatasCruzadas(
+    validas.filter((t) => !existentes.has(t.dedupe_key)),
+    gravadas,
+  );
+  const novas = cruzado.novas;
+  if (cruzado.repetidas.length) log(`${cruzado.repetidas.length} já registrada(s) por e-mail/fatura, ignorada(s)`);
 
   const { categorias, regras } = await contextoParser(storage);
   const semRegra = [];
@@ -86,19 +99,23 @@ export async function syncPluggy({
     saldo,
     novas: novas.length,
     ignoradas: validas.length - novas.length,
+    repetidas: cruzado.repetidas,
     transacoes: novas,
   };
   if (dryRun) return resultado;
   const { inserted } = await storage.saveTransacoes(novas);
   resultado.novas = inserted.length;
   const agora = new Date().toISOString();
-  if (saldo != null && storage.setConfig) {
+  const anterior = JSON.parse((await storage.getConfig?.('saldo_atual')) || 'null');
+  // Saldo digitado no painel vale mais: as contas conectadas podem não ser todas.
+  if (saldo != null && storage.setConfig && (!anterior || anterior.fonte === 'Open Finance')) {
     await storage.setConfig(
       'saldo_atual',
       JSON.stringify({
         valor: saldo,
         atualizado_em: agora,
         fonte: 'Open Finance',
+        contas: itens.map((i) => i.banco).join(', '),
       }),
     );
   }

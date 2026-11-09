@@ -10,14 +10,35 @@ const NAO_CONTA =
   /fatura|pagto\.?\s*cart|pag(amento|to)?\s*(de\s*)?cart[aã]o|aplica[cç][aã]o|resgate|rende\s*f[aá]cil|invest|poupan[cç]a|cdb|tesouro|transf.*mesma\s*titularidade/i;
 const CATEGORIAS_NAO_CONTA = /credit card payment|investment|same person|same ownership/i;
 
-export function nomeConta(conta, item) {
-  const banco = item?.connector?.name || '';
-  if (conta.type === 'CREDIT') {
-    const nome = conta.marketingName || conta.name || 'Cartão';
-    const base = nome.toLowerCase().startsWith(banco.toLowerCase().split(/\s+/)[0]) ? nome : `${banco} ${nome}`.trim();
-    return conta.number ? `${base} final ${String(conta.number).slice(-4)}` : base;
-  }
-  return `${banco || conta.name} ${conta.subtype === 'SAVINGS_ACCOUNT' ? 'poupança' : 'conta'}`.trim();
+const BANCOS = [
+  [/\bnu\s*pag|nubank/i, 'Nubank'],
+  [/ita[uú]|\bpao de acucar\b/i, 'Itaú'],
+  [/mercado\s*pago/i, 'Mercado Pago'],
+  [/bradesco/i, 'Bradesco'],
+  [/santander/i, 'Santander'],
+  [/caixa/i, 'Caixa'],
+  [/\binter\b/i, 'Inter'],
+  [/\bc6\b/i, 'C6'],
+  [/banco do brasil|\bbb\b/i, 'Banco do Brasil'],
+  [/picpay/i, 'PicPay'],
+];
+
+// Itens do Meu Pluggy vêm todos com o conector "MeuPluggy": o banco sai do nome das contas.
+export function bancoDoItem(item, contas = []) {
+  const textos = [
+    ...contas.filter((c) => c.type === 'BANK').flatMap((c) => [c.name, c.marketingName]),
+    ...contas.flatMap((c) => [c.name, c.marketingName]),
+    item?.connector?.name,
+  ].filter(Boolean);
+  for (const t of textos) for (const [re, nome] of BANCOS) if (re.test(t)) return nome;
+  const nome = textos.find((t) => !/meu\s*pluggy/i.test(t)) || 'Banco';
+  return nome.split(/\s+/)[0].replace(/^./, (c) => c.toUpperCase());
+}
+
+// Mesmo nome que os e-mails/faturas usam ("Nubank", "Itaú"), para agrupar e não duplicar.
+export function nomeConta(conta, banco, { variosCartoes = false } = {}) {
+  if (conta.type === 'CREDIT') return variosCartoes && conta.number ? `${banco} final ${String(conta.number).slice(-4)}` : banco;
+  return `${banco} ${conta.subtype === 'SAVINGS_ACCOUNT' ? 'poupança' : 'conta'}`;
 }
 
 function vencimentoDe(tx, conta, faturasPorId) {
@@ -32,11 +53,15 @@ function vencimentoDe(tx, conta, faturasPorId) {
 }
 
 // Converte uma transação da Pluggy no formato do app; null quando ela não deve entrar.
-export function mapTransacao(tx, conta, { item, faturasPorId = new Map(), hoje = new Date().toISOString().slice(0, 10) } = {}) {
-  const data = dia(tx.date);
-  if (!data || (tx.status === 'PENDING' && data > hoje)) return null;
+export function mapTransacao(tx, conta, { nome, faturasPorId = new Map(), hoje = new Date().toISOString().slice(0, 10) } = {}) {
+  const lancada = dia(tx.date);
+  if (!lancada || lancada > hoje) return null; // parcelas futuras: a projeção já conta pelo X/Y
+  const cm = tx.creditCardMetadata || {};
+  const data = conta.type === 'CREDIT' ? dia(cm.purchaseDate) || lancada : lancada;
   const valor = Math.abs(Number(tx.amountInAccountCurrency ?? tx.amount));
-  const descricao = tx.merchant?.name || tx.description || tx.descriptionRaw || '';
+  const sufixo = cm.totalInstallments ? new RegExp(`\\s*0*${cm.installmentNumber}\\s*/\\s*0*${cm.totalInstallments}\\s*$`) : null;
+  const bruta = tx.merchant?.name || tx.description || tx.descriptionRaw || '';
+  const descricao = (sufixo ? bruta.replace(sufixo, '') : bruta).trim();
   let tipo;
   if (conta.type === 'CREDIT') {
     if (!(Number(tx.amount) > 0)) return null; // pagamento da fatura ou estorno
@@ -48,13 +73,12 @@ export function mapTransacao(tx, conta, { item, faturasPorId = new Map(), hoje =
     else if (pix) tipo = 'pix_recebido';
     else return null; // salários e outros créditos já estão em Receitas fixas
   }
-  const cm = tx.creditCardMetadata || {};
   const t = normalizeTransacao(
     {
       data,
       valor,
       estabelecimento: descricao,
-      conta_ou_cartao: nomeConta(conta, item),
+      conta_ou_cartao: nome,
       categoria: 'Outros',
       tipo,
       vencimento: tipo === 'compra' ? vencimentoDe(tx, conta, faturasPorId) : null,
@@ -68,15 +92,15 @@ export function mapTransacao(tx, conta, { item, faturasPorId = new Map(), hoje =
   return t;
 }
 
-export function mapFatura(f, conta, item) {
+export function mapFatura(f, nome) {
   const venc = dia(f.dueDate);
   const valor = Math.round(Number(f.totalAmount) * 100) / 100;
   if (!venc || !(valor > 0)) return null;
   const t = {
     data: venc,
     valor,
-    estabelecimento: `Fatura ${nomeConta(conta, item)}`,
-    conta_ou_cartao: nomeConta(conta, item),
+    estabelecimento: `Fatura ${nome}`,
+    conta_ou_cartao: nome,
     categoria: 'Outros',
     tipo: 'fatura',
     vencimento: venc,
@@ -87,4 +111,24 @@ export function mapFatura(f, conta, item) {
   };
   t.dedupe_key = dedupeKey(t);
   return t;
+}
+
+// Estorno no cartão anula a compra de mesmo valor (ex.: "Estorno de Amazon Credito").
+export function semEstornos(txs) {
+  const estornos = txs.filter(
+    (t) => Number(t.amount) < 0 && !/credit card payment/i.test(t.category || '') && !/pagamento recebido/i.test(t.description || ''),
+  );
+  const fora = new Set();
+  for (const e of estornos) {
+    const desc = String(e.description || '').toLowerCase();
+    const alvo = txs.find(
+      (t) =>
+        !fora.has(t) &&
+        Number(t.amount) > 0 &&
+        Math.abs(Number(t.amount) + Number(e.amount)) < 0.005 &&
+        desc.includes(String(t.description || '').toLowerCase().slice(0, 10)),
+    );
+    if (alvo) fora.add(alvo);
+  }
+  return txs.filter((t) => !fora.has(t));
 }

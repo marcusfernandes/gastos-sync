@@ -8,6 +8,7 @@ import {
 } from './gmail/client.js';
 import { parseEmail } from './parser/gemini.js';
 import { contextoParser, createStorage } from './storage/index.js';
+import { semDuplicatasCruzadas } from './dedupe.js';
 
 const CONCORRENCIA = 4;
 const VALOR_EM_REAIS = /R\$\s?\d|\d{1,3}(\.\d{3})*,\d{2}\b/;
@@ -67,6 +68,17 @@ export async function runIngestion({ fetchEmails, parse, storage, markProcessed,
   }
   if (interrompido) {
     log(`Cota do Gemini esgotada: ${candidatos.length - tentados} e-mail(s) não enviados, mais os que falharam, ficaram para a próxima execução. Ative o billing em https://aistudio.google.com/apikey.`);
+  }
+
+  if (transacoes.length && storage?.listTransacoes) {
+    const desde = transacoes.map((t) => t.data).sort()[0];
+    const gravadas = await Promise.resolve()
+      .then(() => storage.listTransacoes({ desde: new Date(Date.parse(desde) - 5 * 864e5).toISOString().slice(0, 10) }))
+      .catch((e) => (log(`! não consegui comparar com o Open Finance: ${e.message}`), []));
+    const doOpenFinance = gravadas.filter((t) => String(t.origem_email_id || '').startsWith('pluggy:'));
+    const r = semDuplicatasCruzadas(transacoes, doOpenFinance);
+    if (r.repetidas.length) log(`${r.repetidas.length} transação(ões) já vieram pelo Open Finance e foram ignoradas.`);
+    transacoes.splice(0, transacoes.length, ...r.novas);
   }
 
   if (dryRun) {
