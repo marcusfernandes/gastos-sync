@@ -12,6 +12,8 @@ import { carregarContas, lerJsonConfig } from './summary/contas.js';
 import { gerarRelatorio, mesCorrente } from './summary/service.js';
 import { serieMensal } from './summary/historico.js';
 import { montarContexto, responderChat } from './chat.js';
+import { gerarPlano } from './plano.js';
+import { assinaturas, conferencia, orcamentoDoMes } from './summary/analises.js';
 import { syncPluggy } from './pluggy/sync.js';
 import { createTelegram, segredoWebhook } from './telegram/api.js';
 import { chatsAutorizados, enviarAlertas, processarUpdate } from './telegram/bot.js';
@@ -140,6 +142,15 @@ async function lerSaldo(storage) {
 }
 
 const lerContas = (storage, mes) => carregarContas(storage, mes);
+
+async function dadosAnalise(storage, mes, mesesAntes = 7) {
+  return storage.listTransacoes({ desde: `${addMeses(mes, -mesesAntes)}-01` });
+}
+
+async function lerOrcamento(storage, mes) {
+  const [transacoes, limites] = await Promise.all([dadosAnalise(storage, mes, 4), lerJsonConfig(storage, 'orcamentos')]);
+  return orcamentoDoMes(transacoes, mes, limites);
+}
 
 async function status() {
   const configurado = {
@@ -322,6 +333,54 @@ const routes = {
     else dias[chave] = d;
     await storage.setConfig('contas_dias', JSON.stringify(dias));
     send(res, 200, MES_RE.test(mes) ? await lerContas(storage, mes) : { ok: true });
+  },
+
+  'GET /api/orcamentos': async (req, res, url) => {
+    const mes = url.searchParams.get('mes') || mesCorrente();
+    if (!MES_RE.test(mes)) throw new HttpError(400, 'mes deve ser YYYY-MM');
+    send(res, 200, await lerOrcamento(await getStorage(), mes));
+  },
+
+  // { limites: { Categoria: valor|null } } — valor vazio/0 remove a meta.
+  'PUT /api/orcamentos': async (req, res) => {
+    const storage = await getStorage();
+    exigir(storage, 'setConfig');
+    const { mes, limites } = await readJson(req);
+    if (!limites || typeof limites !== 'object') throw new HttpError(400, 'limites é obrigatório');
+    const validas = await categoriasValidas(storage);
+    const atuais = await lerJsonConfig(storage, 'orcamentos');
+    for (const [cat, v] of Object.entries(limites)) {
+      if (!validas.includes(cat)) throw new HttpError(400, `Categoria inválida: ${cat}`);
+      const n = v == null || v === '' ? 0 : Number(v);
+      if (!Number.isFinite(n) || n < 0) throw new HttpError(400, `Valor inválido para ${cat}`);
+      if (n > 0) atuais[cat] = Math.round(n * 100) / 100;
+      else delete atuais[cat];
+    }
+    await storage.setConfig('orcamentos', JSON.stringify(atuais));
+    send(res, 200, await lerOrcamento(storage, MES_RE.test(mes || '') ? mes : mesCorrente()));
+  },
+
+  'GET /api/analises': async (req, res, url) => {
+    const mes = url.searchParams.get('mes') || mesCorrente();
+    if (!MES_RE.test(mes)) throw new HttpError(400, 'mes deve ser YYYY-MM');
+    const storage = await getStorage();
+    const [transacoes, plano] = await Promise.all([dadosAnalise(storage, mes), lerJsonConfig(storage, 'plano_corte')]);
+    send(res, 200, { assinaturas: assinaturas(transacoes, mes), conferencia: conferencia(transacoes, mes), plano: plano.acoes ? plano : null });
+  },
+
+  'POST /api/plano-corte': async (req, res) => {
+    const storage = await getStorage();
+    const mesAtual = mesCorrente();
+    const [transacoes, planejamento, saldo, limites, categorias] = await Promise.all([
+      dadosAnalise(storage, mesAtual),
+      storage.listPlanejamento(),
+      lerSaldo(storage),
+      lerJsonConfig(storage, 'orcamentos'),
+      categoriasValidas(storage),
+    ]);
+    const plano = await gerarPlano({ transacoes, planejamento, mesAtual, saldoAtual: saldo.valor ?? 0, limites, categorias });
+    if (storage.setConfig) await storage.setConfig('plano_corte', JSON.stringify(plano));
+    send(res, 200, plano);
   },
 
   'GET /api/transacoes': async (req, res, url) => {

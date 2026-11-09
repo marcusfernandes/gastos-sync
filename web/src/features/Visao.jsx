@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowDownCircle, ArrowUpCircle, CalendarClock, CreditCard, PiggyBank, Receipt, Wallet } from 'lucide-react';
+import { AlertTriangle, ArrowDownCircle, ArrowUpCircle, CalendarClock, CreditCard, Receipt, Wallet } from 'lucide-react';
 import { Area, CartesianGrid, ComposedChart, Bar, ReferenceLine, XAxis, YAxis } from 'recharts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -10,6 +10,7 @@ import { formatarBRL } from '@/components/tooltip';
 import { CategoriaSelect } from '@/components/CategoriaSelect';
 import { SaldoAtual } from '@/features/SaldoAtual';
 import { ContasMes } from '@/features/ContasMes';
+import { GastosPorCategoria } from '@/features/Orcamento';
 import { brl, eixoBRL, mesBR, mesBRCurto } from '@/lib/format';
 import { useDados, useMudarCategoria } from '@/lib/dados';
 import { cn } from '@/lib/utils';
@@ -39,7 +40,7 @@ export function Visao() {
         </div>
         <div className="grid min-w-0 gap-4 lg:col-span-2">
           <SaldoAtual />
-          <Categorias porCategoria={r.gastos.por_categoria} />
+          <GastosPorCategoria />
         </div>
       </div>
 
@@ -56,37 +57,6 @@ function Carregando() {
       <Skeleton className="h-64" />
       <Skeleton className="h-80" />
     </div>
-  );
-}
-
-const CORES = ['var(--chart-1)', 'var(--chart-2)', 'var(--chart-3)', 'var(--chart-4)', 'var(--chart-5)'];
-
-function Categorias({ porCategoria, className }) {
-  const itens = Object.entries(porCategoria || {});
-  const total = itens.reduce((a, [, v]) => a + v, 0);
-  const max = itens[0]?.[1] || 1;
-  return (
-    <Card className={className}>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base"><PiggyBank className="size-4 text-primary" /> Gastos por categoria</CardTitle>
-        <CardDescription>{itens.length ? `${brl(total)} em gastos registrados no mês` : 'Sem gastos registrados neste mês'}</CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-3">
-        {itens.map(([cat, v], i) => (
-          <div key={cat} className="grid gap-1">
-            <div className="flex items-center justify-between gap-2 text-sm">
-              <span className="truncate">{cat}</span>
-              <span className="shrink-0 tabular-nums text-muted-foreground">
-                {brl(v)} <span className="text-xs">· {Math.round((v / total) * 100)}%</span>
-              </span>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-muted">
-              <div className="h-full rounded-full" style={{ width: `${(v / max) * 100}%`, background: CORES[i % CORES.length] }} />
-            </div>
-          </div>
-        ))}
-      </CardContent>
-    </Card>
   );
 }
 

@@ -1,4 +1,4 @@
-const GASTO_TIPOS = new Set(['compra', 'pix_enviado', 'debito', 'outro']);
+export const GASTO_TIPOS = new Set(['compra', 'pix_enviado', 'debito', 'outro']);
 
 const round = (n) => Math.round(n * 100) / 100;
 const sum = (items) => round(items.reduce((acc, i) => acc + i.valor, 0));
@@ -28,7 +28,7 @@ export function planejadoNoMes(item, mes) {
   return inicio <= mes && (!item.fim || mesDe(item.fim) >= mes);
 }
 
-const parcelado = (t) => t.tipo === 'compra' && t.parcelas_total > 1;
+export const parcelado = (t) => t.tipo === 'compra' && t.parcelas_total > 1;
 
 // Mês em que a parcela foi cobrada: vencimento da fatura ou, sem ele, o mês seguinte à compra.
 const mesCobranca = (t) => (t.vencimento ? mesDe(t.vencimento) : addMeses(mesDe(t.data), 1));
@@ -81,7 +81,7 @@ function porCategoria(items) {
 }
 
 // Compras de cartão contam no mês em que a fatura vence, como as faturas sem detalhe.
-const mesPago = (t) => mesDe(t.vencimento || t.data);
+export const mesPago = (t) => mesDe(t.vencimento || t.data);
 
 export function resumoMensal(transacoes, planejamento, mes) {
   const gastos = transacoes.filter((t) => GASTO_TIPOS.has(t.tipo) && mesPago(t) === mes);

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BarChart3, Calculator, LayoutDashboard, ListChecks, Mail, Moon, MoreVertical, RefreshCw, Sparkles, Sun, Tags, Wallet, Wrench } from 'lucide-react';
+import { BarChart3, Lightbulb, Calculator, LayoutDashboard, ListChecks, Mail, Moon, MoreVertical, RefreshCw, Sparkles, Sun, Tags, Wallet, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -19,10 +19,12 @@ import { Categorias } from '@/features/Categorias';
 import { Ferramentas } from '@/features/Ferramentas';
 import { Chat } from '@/features/Chat';
 import { Simulador } from '@/features/Simulador';
+import { Analises } from '@/features/Analises';
 
 const ABAS = [
   ['visao', 'Visão geral', LayoutDashboard, Visao],
   ['graficos', 'Gráficos', BarChart3, Graficos],
+  ['analises', 'Análises', Lightbulb, Analises],
   ['simulador', 'Simular compra', Calculator, Simulador],
   ['transacoes', 'Transações', ListChecks, Transacoes],
   ['planejamento', 'Receitas e fixos', Wallet, Planejamento],

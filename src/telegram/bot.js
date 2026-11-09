@@ -7,6 +7,7 @@ import { montarContexto, responderChat } from '../chat.js';
 import { addMeses } from '../summary/forecast.js';
 import { gerarRelatorio } from '../summary/service.js';
 import { carregarContas, hojeBR, lerJsonConfig } from '../summary/contas.js';
+import { assinaturas, conferencia, orcamentoDoMes } from '../summary/analises.js';
 
 const brl = (n) => Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const dataBR = (d) => (d ? d.split('-').reverse().join('/') : '');
@@ -294,6 +295,35 @@ export async function processarUpdate(update, { storage, tg, ...deps }) {
   return conversar(storage, tg, chatId, texto, deps);
 }
 
+// Metas passando de 80%/100%, assinaturas mais caras e compras repetidas: cada aviso sai uma vez por mês.
+export async function avisosDoMes(storage, mes, estado) {
+  const [transacoes, limites] = await Promise.all([
+    storage.listTransacoes({ desde: `${addMeses(mes, -7)}-01` }),
+    lerJsonConfig(storage, 'orcamentos'),
+  ]);
+  if (estado.avisos?.mes !== mes) estado.avisos = { mes, chaves: [] };
+  const ja = new Set(estado.avisos.chaves);
+  const linhas = [];
+  const novo = (chave, texto) => {
+    if (ja.has(chave)) return;
+    ja.add(chave);
+    linhas.push(texto);
+  };
+  for (const i of orcamentoDoMes(transacoes, mes, limites).itens) {
+    if (i.nivel === 'estourou') novo(`orc:${i.categoria}:100`, `🔴 ${i.categoria}: ${brl(i.gasto)} de ${brl(i.limite)} — meta estourada em ${brl(-i.restante)}`);
+    else if (i.nivel === 'alerta') novo(`orc:${i.categoria}:80`, `🟡 ${i.categoria}: ${brl(i.gasto)} de ${brl(i.limite)} (${Math.round(i.percentual * 100)}%) — restam ${brl(i.restante)}`);
+  }
+  for (const a of assinaturas(transacoes, mes).itens) {
+    if (a.aumento && a.ultima_data.startsWith(mes)) novo(`assin:${a.chave}:${a.valor}`, `📈 ${a.estabelecimento} subiu de ${brl(a.valor_anterior)} para ${brl(a.valor)}`);
+    if (a.nova) novo(`nova:${a.chave}`, `🆕 Assinatura nova: ${a.estabelecimento} ${brl(a.valor)} (${a.conta_ou_cartao})`);
+  }
+  for (const [x, y] of conferencia(transacoes, mes).duplicadas) {
+    novo(`dup:${x.id}:${y.id}`, `⚠️ Possível compra repetida: ${x.estabelecimento} ${brl(x.valor)} em ${dataBR(x.data)} e ${dataBR(y.data)} (${x.conta_ou_cartao})`);
+  }
+  estado.avisos.chaves = [...ja];
+  return linhas.length ? ['Avisos do mês:', ...linhas, '', 'Detalhes no painel, em Análises.'].join('\n') : null;
+}
+
 const horaBR = (agora) => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', hour: 'numeric', hourCycle: 'h23' }).format(agora));
 const diaSemanaBR = (agora) => new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', weekday: 'short' }).format(agora);
 
@@ -320,6 +350,9 @@ export async function enviarAlertas({ storage, tg, agora = new Date(), hora = co
       ].join('\n'));
     }
   }
+  const avisos = await avisosDoMes(storage, hoje.slice(0, 7), estado);
+  if (avisos) mensagens.push(avisos);
+
   if (diaSemanaBR(agora) === 'Mon' && estado.semanal !== hoje) {
     estado.semanal = hoje;
     mensagens.push(await textoSemana(storage, hoje));

@@ -94,3 +94,20 @@ test('resumo semanal às segundas', async () => {
   await enviarAlertas({ storage, tg, agora: new Date('2026-11-09T12:00:00Z'), hora: 8 });
   assert.match(tg.enviadas.at(-1).texto, /Resumo da semana[\s\S]*Padaria: R\$\s?50,00/);
 });
+
+test('avisa meta de categoria passando de 80% uma vez só no mês', async () => {
+  const storage = await createMemoryStorage();
+  const tg = fakeTg();
+  await processarUpdate(msg('/start segredo'), { storage, tg });
+  await storage.setConfig('orcamentos', JSON.stringify({ Lazer: 100 }));
+  await storage.saveTransacoes([{ data: '2026-11-08', valor: 85, estabelecimento: 'Cinema', conta_ou_cartao: 'Manual', categoria: 'Lazer', tipo: 'pix_enviado', dedupe_key: 'c1' }]);
+  tg.enviadas.length = 0;
+  await enviarAlertas({ storage, tg, agora: new Date('2026-11-10T12:00:00Z'), hora: 8 });
+  assert.match(tg.enviadas.at(-1).texto, /Lazer: R\$\s?85,00 de R\$\s?100,00 \(85%\)/);
+  const n = tg.enviadas.length;
+  await enviarAlertas({ storage, tg, agora: new Date('2026-11-10T15:00:00Z'), hora: 8 });
+  assert.equal(tg.enviadas.length, n);
+  await storage.saveTransacoes([{ data: '2026-11-09', valor: 30, estabelecimento: 'Bar', conta_ou_cartao: 'Manual', categoria: 'Lazer', tipo: 'pix_enviado', dedupe_key: 'c2' }]);
+  await enviarAlertas({ storage, tg, agora: new Date('2026-11-10T18:00:00Z'), hora: 8 });
+  assert.match(tg.enviadas.at(-1).texto, /meta estourada/);
+});
