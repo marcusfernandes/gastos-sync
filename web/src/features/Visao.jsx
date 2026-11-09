@@ -9,7 +9,8 @@ import { Kpi } from '@/components/Kpi';
 import { formatarBRL } from '@/components/tooltip';
 import { CategoriaSelect } from '@/components/CategoriaSelect';
 import { SaldoAtual } from '@/features/SaldoAtual';
-import { brl, eixoBRL, dataBR, mesBR, mesBRCurto } from '@/lib/format';
+import { ContasMes } from '@/features/ContasMes';
+import { brl, eixoBRL, mesBR, mesBRCurto } from '@/lib/format';
 import { useDados, useMudarCategoria } from '@/lib/dados';
 import { cn } from '@/lib/utils';
 
@@ -35,7 +36,7 @@ export function Visao() {
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="grid gap-4 lg:col-span-1">
           <SaldoAtual />
-          <Faturas faturas={r.faturas} />
+          <ContasMes />
         </div>
         <Categorias porCategoria={r.gastos.por_categoria} className="lg:col-span-2" />
       </div>
@@ -53,30 +54,6 @@ function Carregando() {
       <Skeleton className="h-64" />
       <Skeleton className="h-80" />
     </div>
-  );
-}
-
-function Faturas({ faturas }) {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base"><CreditCard className="size-4 text-primary" /> Faturas vencendo no mês</CardTitle>
-        <CardDescription>{faturas.itens.length ? `Total ${brl(faturas.total_vencendo)}` : 'Nenhuma fatura neste mês'}</CardDescription>
-      </CardHeader>
-      {faturas.itens.length > 0 && (
-        <CardContent className="grid gap-2">
-          {faturas.itens.map((f, i) => (
-            <div key={i} className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm">
-              <div className="min-w-0">
-                <div className="truncate font-medium">{f.conta}</div>
-                <div className="text-xs text-muted-foreground">vence {dataBR(f.vencimento)}</div>
-              </div>
-              <span className="tabular-nums font-medium">{brl(f.valor)}</span>
-            </div>
-          ))}
-        </CardContent>
-      )}
-    </Card>
   );
 }
 

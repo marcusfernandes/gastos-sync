@@ -8,6 +8,7 @@ import { parseEmail } from './parser/gemini.js';
 import { chaveEstabelecimento, parseData } from './parser/normalize.js';
 import { contextoParser, createStorage } from './storage/index.js';
 import { addMeses } from './summary/forecast.js';
+import { contasDoMes, hojeBR } from './summary/contas.js';
 import { gerarRelatorio, mesCorrente } from './summary/service.js';
 import { serieMensal } from './summary/historico.js';
 import { montarContexto, responderChat } from './chat.js';
@@ -134,6 +135,21 @@ async function lerSaldo(storage) {
   return JSON.parse((await storage.getConfig('saldo_atual')) || 'null') ?? { valor: null, atualizado_em: null };
 }
 
+async function lerJsonConfig(storage, chave) {
+  if (!storage.getConfig) return {};
+  return JSON.parse((await storage.getConfig(chave)) || '{}');
+}
+
+async function lerContas(storage, mes) {
+  const [transacoes, planejamento, pagos, dias] = await Promise.all([
+    storage.listTransacoes({ desde: `${addMeses(mes, -3)}-01` }),
+    storage.listPlanejamento(),
+    lerJsonConfig(storage, 'contas_pagas'),
+    lerJsonConfig(storage, 'contas_dias'),
+  ]);
+  return contasDoMes(transacoes, planejamento, mes, { pagos: pagos[mes] || {}, dias, hoje: hojeBR() });
+}
+
 async function status() {
   const configurado = {
     gemini: hasEnv('GEMINI_API_KEY'),
@@ -256,6 +272,41 @@ const routes = {
       storage: await getStorage(),
     });
     send(res, 200, rel);
+  },
+
+  'GET /api/contas': async (req, res, url) => {
+    const mes = url.searchParams.get('mes') || mesCorrente();
+    if (!MES_RE.test(mes)) throw new HttpError(400, 'mes deve ser YYYY-MM');
+    send(res, 200, await lerContas(await getStorage(), mes));
+  },
+
+  'PUT /api/contas/pago': async (req, res) => {
+    const storage = await getStorage();
+    exigir(storage, 'setConfig');
+    const { mes, chave, pago } = await readJson(req);
+    if (!MES_RE.test(mes)) throw new HttpError(400, 'mes deve ser YYYY-MM');
+    if (!/^(fixo|cartao):.{1,120}$/.test(chave || '')) throw new HttpError(400, 'chave inválida');
+    const pagos = await lerJsonConfig(storage, 'contas_pagas');
+    pagos[mes] = pagos[mes] || {};
+    if (pago === false) delete pagos[mes][chave];
+    else pagos[mes][chave] = new Date().toISOString();
+    if (!Object.keys(pagos[mes]).length) delete pagos[mes];
+    await storage.setConfig('contas_pagas', JSON.stringify(pagos));
+    send(res, 200, await lerContas(storage, mes));
+  },
+
+  'PUT /api/contas/dia': async (req, res) => {
+    const storage = await getStorage();
+    exigir(storage, 'setConfig');
+    const { mes, chave, dia } = await readJson(req);
+    if (!/^fixo:.{1,120}$/.test(chave || '')) throw new HttpError(400, 'chave inválida');
+    const d = dia == null || dia === '' ? null : Number(dia);
+    if (d !== null && !(Number.isInteger(d) && d >= 1 && d <= 31)) throw new HttpError(400, 'dia deve ser 1..31');
+    const dias = await lerJsonConfig(storage, 'contas_dias');
+    if (d === null) delete dias[chave];
+    else dias[chave] = d;
+    await storage.setConfig('contas_dias', JSON.stringify(dias));
+    send(res, 200, MES_RE.test(mes) ? await lerContas(storage, mes) : { ok: true });
   },
 
   'GET /api/transacoes': async (req, res, url) => {
