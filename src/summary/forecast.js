@@ -111,6 +111,9 @@ export function resumoMensal(transacoes, planejamento, mes) {
   };
 }
 
+// Compras de cartão contam no mês em que a fatura vence, como as faturas sem detalhe.
+const mesPago = (t) => mesDe(t.vencimento || t.data);
+
 // Média mensal de gastos variáveis nos últimos N meses fechados, excluindo
 // categorias cobertas por despesas fixas planejadas (evita contar o aluguel duas vezes).
 export function mediaVariavel(transacoes, planejamento, mesAtual, nMeses) {
@@ -119,11 +122,26 @@ export function mediaVariavel(transacoes, planejamento, mesAtual, nMeses) {
   );
   const meses = Array.from({ length: nMeses }, (_, i) => addMeses(mesAtual, -(i + 1)));
   const variaveis = transacoes.filter(
-    (t) => GASTO_TIPOS.has(t.tipo) && !parcelado(t) && !categoriasFixas.has(t.categoria) && meses.includes(mesDe(t.data)),
+    (t) => GASTO_TIPOS.has(t.tipo) && !parcelado(t) && !categoriasFixas.has(t.categoria) && meses.includes(mesPago(t)),
   );
   const faturas = faturasSemDetalhe(transacoes).filter((t) => meses.includes(mesDe(t.vencimento || t.data)));
-  const mesesComDados = new Set([...variaveis.map((t) => mesDe(t.data)), ...faturas.map((t) => mesDe(t.vencimento || t.data))]).size;
-  return mesesComDados ? round((sum(variaveis) + sum(faturas)) / mesesComDados) : 0;
+  const mesesComDados = new Set([...variaveis.map(mesPago), ...faturas.map((t) => mesDe(t.vencimento || t.data))]).size;
+  return mesesComDados ? round((sum(variaveis) + sum(faturas) - parcelasEmFaturas(transacoes, faturas)) / mesesComDados) : 0;
+}
+
+// Faturas só com o total já incluem as parcelas daquele mês; como a projeção soma as parcelas
+// conhecidas à parte, elas saem da média (limitado ao total das faturas sem detalhe do mês).
+function parcelasEmFaturas(transacoes, faturas) {
+  const detalhados = new Set(transacoes.filter((t) => t.tipo === 'compra').map((t) => `${cartaoDe(t)}|${mesPago(t)}`));
+  const abertos = parcelamentos(transacoes);
+  let total = 0;
+  for (const mes of new Set(faturas.map((t) => mesDe(t.vencimento || t.data)))) {
+    const parcelas = abertos
+      .filter((p) => addMeses(p.mes_cobranca, 1 - p.parcela_atual) <= mes && mes <= p.mes_fim)
+      .filter((p) => !detalhados.has(`${cartaoDe(p)}|${mes}`));
+    total += Math.min(sum(faturas.filter((t) => mesDe(t.vencimento || t.data) === mes)), sum(parcelas.map((p) => ({ valor: p.valor_parcela }))));
+  }
+  return round(total);
 }
 
 export function projecao(transacoes, planejamento, { mesAtual, meses = 6, saldoInicial = 0, mesesHistorico = 3 }) {

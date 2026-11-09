@@ -76,8 +76,20 @@ test('faturas de cartões sem compras detalhadas entram na média e no saldo do 
     { data: '2026-10-10', vencimento: '2026-10-10', valor: 999, conta_ou_cartao: 'Nubank', categoria: 'Outros', tipo: 'fatura' },
     { data: '2026-10-10', vencimento: '2026-10-10', valor: 500, conta_ou_cartao: 'Infinit', categoria: 'Outros', tipo: 'fatura' },
   ];
-  assert.equal(mediaVariavel(tx, [], '2026-11', 3), 300);
+  assert.equal(mediaVariavel(tx, [], '2026-11', 3), 450); // compra conta no mês da fatura (out): (300 + 100 + 500) / 2 meses
   const r = resumoMensal(tx, [{ descricao: 'Salário', direcao: 'entrada', valor: 2000, recorrente: true, inicio: '2026-01-01' }], '2026-10');
   assert.equal(r.gastos.faturas_sem_detalhe, 500);
   assert.equal(r.saldo_estimado, 1500);
 });
+
+test('parcelas já conhecidas saem da média calculada por faturas sem detalhe', () => {
+  const tx = [
+    { data: '2026-10-20', vencimento: '2026-11-10', valor: 200, conta_ou_cartao: 'Bradesco Visa', estabelecimento: 'Loja (parcela 3/10)', categoria: 'Compras', tipo: 'compra', parcela_atual: 3, parcelas_total: 10 },
+    { data: '2026-09-10', vencimento: '2026-09-10', valor: 1000, conta_ou_cartao: 'Infinit', categoria: 'Outros', tipo: 'fatura' },
+    { data: '2026-10-10', vencimento: '2026-10-10', valor: 1000, conta_ou_cartao: 'Infinit', categoria: 'Outros', tipo: 'fatura' },
+    { data: '2026-08-10', vencimento: '2026-08-10', valor: 1000, conta_ou_cartao: 'Infinit', categoria: 'Outros', tipo: 'fatura' },
+  ];
+  // parcela 3/10 em nov → 1/10 em set, 2/10 em out; agosto não tinha a parcela
+  assert.equal(mediaVariavel(tx, [], '2026-11', 3), round2((3000 - 400) / 3));
+});
+const round2 = (n) => Math.round(n * 100) / 100;

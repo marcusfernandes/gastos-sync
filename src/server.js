@@ -14,7 +14,24 @@ import { montarContexto, responderChat } from './chat.js';
 
 const MES_RE = /^\d{4}-\d{2}$/;
 const PUBLIC_PATHS = new Set(['/health', '/privacidade']);
-const painelHtml = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
+const DIST = new URL('../web/dist/', import.meta.url);
+const painelHtml = await readFile(new URL('index.html', DIST), 'utf8')
+  .catch(() => readFile(new URL('../public/index.html', import.meta.url), 'utf8'));
+const MIME = { '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.png': 'image/png', '.ico': 'image/x-icon' };
+
+async function sendAsset(res, pathname) {
+  const nome = pathname.replace(/^\/+/, '');
+  if (!/^[\w./-]+$/.test(nome) || nome.includes('..')) return false;
+  const corpo = await readFile(new URL(nome, DIST)).catch(() => null);
+  if (!corpo) return false;
+  const ext = nome.slice(nome.lastIndexOf('.'));
+  res.writeHead(200, {
+    'content-type': MIME[ext] || 'application/octet-stream',
+    'cache-control': nome.startsWith('assets/') ? 'public, max-age=31536000, immutable' : 'no-cache',
+  });
+  res.end(corpo);
+  return true;
+}
 const privacidadeHtml = await readFile(new URL('../public/privacidade.html', import.meta.url), 'utf8');
 const oauthStates = new Map();
 let ingestaoEmAndamento = false;
@@ -420,7 +437,10 @@ const server = http.createServer(async (req, res) => {
       return res.end('Autenticação necessária');
     }
     const handler = routes[`${req.method} ${url.pathname}`];
-    if (!handler) return send(res, 404, { erro: 'Rota não encontrada' });
+    if (!handler) {
+      if (req.method === 'GET' && !url.pathname.startsWith('/api/') && (await sendAsset(res, url.pathname))) return;
+      return send(res, 404, { erro: 'Rota não encontrada' });
+    }
     await handler(req, res, url);
   } catch (err) {
     const statusCode = err.status || 500;
