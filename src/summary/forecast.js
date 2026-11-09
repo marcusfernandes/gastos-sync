@@ -35,13 +35,20 @@ const mesCobranca = (t) => (t.vencimento ? mesDe(t.vencimento) : addMeses(mesDe(
 
 // Uma linha por compra parcelada (a parcela mais recente conhecida), com o mês da última parcela.
 export function parcelamentos(transacoes) {
-  const ultimas = new Map();
+  // A mesma compra pode vir do e-mail e do Open Finance com nomes diferentes ("PETZ - NuPay" e "PETZ"):
+  // agrupa por banco, nº de parcelas, mês da 1ª parcela e valor (a 1ª parcela pode ter centavos a mais).
+  const grupos = [];
   for (const t of transacoes.filter(parcelado)) {
     const base = t.estabelecimento.replace(/\s*\(parcela\s*\d+\s*\/\s*\d+\)\s*/i, '').trim().replace(/[\s\-–:,]+$/, '');
-    const chave = [t.conta_ou_cartao, base.toLowerCase(), t.valor.toFixed(2), t.parcelas_total].join('|');
-    const atual = ultimas.get(chave);
-    if (!atual || t.parcela_atual > atual.parcela_atual) ultimas.set(chave, { ...t, base });
+    const banco = String(t.conta_ou_cartao || '').toLowerCase().split(/\s+/)[0];
+    const inicio = addMeses(mesCobranca(t), 1 - t.parcela_atual);
+    const g = grupos.find(
+      (x) => x.banco === banco && x.t.parcelas_total === t.parcelas_total && x.inicio === inicio && Math.abs(x.t.valor - t.valor) <= Math.max(0.1, t.valor * 0.01),
+    );
+    if (!g) grupos.push({ banco, inicio, t: { ...t, base } });
+    else if (t.parcela_atual > g.t.parcela_atual) g.t = { ...t, base };
   }
+  const ultimas = new Map(grupos.map((g, i) => [i, g.t]));
   return [...ultimas.values()]
     .map((t) => {
       const restantes = t.parcelas_total - t.parcela_atual;

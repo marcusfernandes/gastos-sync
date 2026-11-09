@@ -33,12 +33,14 @@ export function Visao() {
         <Kpi titulo="Saldo do mês" valor={<span className={corValor(r.saldo_estimado)}>{brl(r.saldo_estimado)}</span>} icone={Wallet} detalhe={mesBR(mes)} />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="grid gap-4 lg:col-span-1">
-          <SaldoAtual />
+      <div className="grid items-start gap-4 lg:grid-cols-5">
+        <div className="min-w-0 lg:col-span-3">
           <ContasMes />
         </div>
-        <Categorias porCategoria={r.gastos.por_categoria} className="lg:col-span-2" />
+        <div className="grid min-w-0 gap-4 lg:col-span-2">
+          <SaldoAtual />
+          <Categorias porCategoria={r.gastos.por_categoria} />
+        </div>
       </div>
 
       <Projecao p={p} />

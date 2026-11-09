@@ -94,3 +94,14 @@ test('parcelas já conhecidas saem da média calculada por faturas sem detalhe',
   assert.equal(mediaVariavel(tx, [], '2026-11', 3), round2((3000 - 400) / 3));
 });
 const round2 = (n) => Math.round(n * 100) / 100;
+
+test('mesma compra parcelada vinda do e-mail e do Open Finance aparece uma vez só', () => {
+  const tx = [
+    { tipo: 'compra', estabelecimento: 'PETZ - NuPay (parcela 1/3)', conta_ou_cartao: 'Nubank', valor: 148.34, parcela_atual: 1, parcelas_total: 3, vencimento: '2026-11-12', data: '2026-10-05' },
+    { tipo: 'compra', estabelecimento: 'PETZ (parcela 2/3)', conta_ou_cartao: 'Nubank', valor: 148.33, parcela_atual: 2, parcelas_total: 3, vencimento: '2026-12-12', data: '2026-10-17' },
+    { tipo: 'compra', estabelecimento: 'Outra (parcela 1/3)', conta_ou_cartao: 'Nubank', valor: 148.33, parcela_atual: 1, parcelas_total: 3, vencimento: '2026-12-12', data: '2026-11-17' },
+  ];
+  const l = parcelamentos(tx);
+  assert.equal(l.length, 2);
+  assert.equal(l.find((p) => p.estabelecimento === 'PETZ').parcela_atual, 2);
+});

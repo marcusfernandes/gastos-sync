@@ -87,8 +87,8 @@ export function ContasMes() {
                     )}
                   </div>
                 </div>
-                {selo && <Badge variant="outline" className={cn('hidden sm:inline-flex', selo[1])}>{selo[0]}</Badge>}
-                <span className="tabular-nums font-medium">{brl(c.valor)}</span>
+                {selo && <Badge variant="outline" className={cn('hidden shrink-0 sm:inline-flex', selo[1])}>{selo[0]}</Badge>}
+                <span className="shrink-0 whitespace-nowrap tabular-nums font-medium">{brl(c.valor)}</span>
               </label>
             );
           })}
