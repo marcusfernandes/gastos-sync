@@ -38,7 +38,7 @@ export function SaldoAtual() {
         <CardDescription>
           {vazio
             ? 'Informe quanto vocês têm hoje somando as contas. A projeção parte desse valor (hoje está em R$ 0).'
-            : `${brl(saldo.valor)} · atualizado em ${dataHoraBR(saldo.atualizado_em)}`}
+            : `${brl(saldo.valor)} · atualizado em ${dataHoraBR(saldo.atualizado_em)}${saldo.fonte ? ` · ${saldo.fonte}` : ''}`}
         </CardDescription>
       </CardHeader>
       <CardContent>

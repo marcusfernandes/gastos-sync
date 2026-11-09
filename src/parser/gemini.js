@@ -58,3 +58,46 @@ export async function parseEmail(email, ai = getClient(), { categorias = CATEGOR
   const transacoes = (parsed.transacoes || []).map((t) => normalizeTransacao(t, email, categorias)).filter(Boolean);
   return posProcessar(transacoes, regras);
 }
+
+// Classifica nomes de estabelecimentos (ex.: vindos do Open Finance) numa única chamada barata.
+export async function categorizarEstabelecimentos(nomes, categorias = CATEGORIAS, ai = getClient()) {
+  if (!nomes.length) return new Map();
+  const { model, thinking } = config.gemini;
+  const thinkingConfig = thinking === 'off' ? undefined : { thinkingLevel: thinking };
+  const response = await withRetry(() =>
+    ai.models.generateContent({
+      model,
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              text: `Classifique cada estabelecimento de compras/pagamentos de uma família brasileira em uma das categorias: ${categorias.join(', ')}. Use "Outros" quando não tiver certeza.\n\n${nomes.map((n, i) => `${i + 1}. ${n}`).join('\n')}`,
+            },
+          ],
+        },
+      ],
+      config: {
+        temperature: 0,
+        responseMimeType: 'application/json',
+        responseJsonSchema: {
+          type: 'object',
+          properties: {
+            itens: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: { numero: { type: 'integer' }, categoria: { type: 'string', enum: categorias } },
+                required: ['numero', 'categoria'],
+              },
+            },
+          },
+          required: ['itens'],
+        },
+        ...(thinkingConfig && { thinkingConfig }),
+      },
+    }),
+  );
+  const { itens = [] } = JSON.parse(response.text || '{}');
+  return new Map(itens.filter((i) => nomes[i.numero - 1] && categorias.includes(i.categoria)).map((i) => [nomes[i.numero - 1], i.categoria]));
+}

@@ -49,6 +49,18 @@ export function googleRedirectUri() {
 }
 
 export const config = {
+  // Open Finance via Meu Pluggy (uso pessoal). Cada titular pode ter a própria aplicação:
+  // PLUGGY_CLIENT_ID/SECRET/ITEM_IDS e, opcionalmente, PLUGGY_2_CLIENT_ID/SECRET/ITEM_IDS.
+  get pluggy() {
+    const conjuntos = ['PLUGGY', 'PLUGGY_2']
+      .map((p) => ({
+        clientId: process.env[`${p}_CLIENT_ID`] || null,
+        clientSecret: process.env[`${p}_CLIENT_SECRET`] || null,
+        itemIds: (process.env[`${p}_ITEM_IDS`] || '').split(',').map((s) => s.trim()).filter(Boolean),
+      }))
+      .filter((c) => c.clientId && c.clientSecret && c.itemIds.length);
+    return { conjuntos, ativo: conjuntos.length > 0, diasSync: int('PLUGGY_DIAS_SYNC', 40) };
+  },
   get gmail() {
     return {
       clientId: required('GOOGLE_CLIENT_ID'),

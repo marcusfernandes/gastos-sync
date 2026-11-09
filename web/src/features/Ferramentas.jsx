@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FileUp, Mail, Play, TestTube2 } from 'lucide-react';
+import { FileUp, Landmark, Mail, Play, TestTube2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,7 +8,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/api';
 import { useDados } from '@/lib/dados';
 import { useDialogs } from '@/lib/dialogs';
-import { dataHoraBR } from '@/lib/format';
+import { brl, dataBR, dataHoraBR } from '@/lib/format';
 
 const lerBase64 = (file) => new Promise((ok, fail) => {
   const fr = new FileReader();
@@ -62,7 +62,22 @@ export function Ferramentas() {
     } catch (e) { setSaidaParser(`Erro: ${e.message}`); } finally { setOcupado(false); }
   };
 
+  const [saidaOF, setSaidaOF] = useState('');
+  const openFinance = async (dryRun, dias) => {
+    if (!dryRun && !(await dialogs.confirm({ title: dias ? 'Importar 12 meses do Open Finance?' : 'Sincronizar Open Finance?', description: 'Grava as movimentações novas dos bancos conectados e atualiza o saldo atual.', confirmText: 'Importar' }))) return;
+    setOcupado(true);
+    setSaidaOF('Consultando os bancos pela Pluggy…');
+    try {
+      const r = await api('/api/pluggy/sync', { method: 'POST', body: { dryRun, dias } });
+      setSaidaOF(`${r.logs.join('\n')}\n\n${dryRun ? 'Seriam gravadas' : 'Gravadas'}: ${r.novas} · já existiam: ${r.ignoradas}${r.saldo != null ? ` · saldo nas contas: ${brl(r.saldo)}` : ''}`);
+      if (!dryRun) { recarregar(); carregarStatus(); toast.success(`${r.novas} movimentação(ões) nova(s)`); }
+    } catch (e) { setSaidaOF(`Erro: ${e.message}`); } finally { setOcupado(false); }
+  };
+
   const u = status?.ultima_ingestao;
+  const of = status?.pluggy;
+  const expira = (of?.itens || []).map((i) => i.consentimento_expira).filter(Boolean).sort()[0];
+  const diasExpira = expira ? Math.ceil((new Date(expira) - Date.now()) / 864e5) : null;
   return (
     <div className="grid gap-4 lg:grid-cols-2">
       <Card>
@@ -81,6 +96,37 @@ export function Ferramentas() {
           <Saida texto={saidaIng} />
         </CardContent>
       </Card>
+      {status?.configurado?.pluggy && (
+        <Card className={diasExpira != null && diasExpira <= 30 ? 'border-amber-500/50' : ''}>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base"><Landmark className="size-4 text-primary" /> Open Finance (Meu Pluggy)</CardTitle>
+            <CardDescription>
+              Sincroniza junto com a ingestão a cada 3 horas. Os bancos atualizam na Pluggy uma vez por dia.
+              {of && <> Última: {dataHoraBR(of.em)} · {of.novas} nova(s).</>}
+              {expira && <> Autorização vence em {dataBR(expira.slice(0, 10))}{diasExpira <= 30 && ' — renove no Meu Pluggy'}.</>}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-3">
+            {of?.itens?.length > 0 && (
+              <ul className="grid gap-1 text-sm">
+                {of.itens.map((i) => (
+                  <li key={i.id}>
+                    <span className="font-medium">{i.banco}</span>{' '}
+                    <span className={i.erro || !['UPDATED', 'UPDATING'].includes(i.status) ? 'text-amber-600' : 'text-muted-foreground'}>{i.erro || i.status}</span>
+                    <span className="text-muted-foreground"> · {i.contas.map((c) => c.nome).join(', ')}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" disabled={ocupado} onClick={() => openFinance(true)}><TestTube2 /> Simular</Button>
+              <Button disabled={ocupado} onClick={() => openFinance(false)}><Play /> Sincronizar</Button>
+              <Button variant="outline" disabled={ocupado} onClick={() => openFinance(false, 365)}>Importar 12 meses</Button>
+            </div>
+            <Saida texto={saidaOF} />
+          </CardContent>
+        </Card>
+      )}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base"><FileUp className="size-4 text-primary" /> Testar leitura</CardTitle>

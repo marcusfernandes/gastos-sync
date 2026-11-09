@@ -11,6 +11,7 @@ import { addMeses } from './summary/forecast.js';
 import { gerarRelatorio, mesCorrente } from './summary/service.js';
 import { serieMensal } from './summary/historico.js';
 import { montarContexto, responderChat } from './chat.js';
+import { syncPluggy } from './pluggy/sync.js';
 
 const MES_RE = /^\d{4}-\d{2}$/;
 const PUBLIC_PATHS = new Set(['/health', '/privacidade']);
@@ -141,6 +142,7 @@ async function status() {
       memory: true,
     }[config.storageBackend] ?? hasEnv('SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY'),
     google_oauth: hasEnv('GOOGLE_CLIENT_ID', 'GOOGLE_CLIENT_SECRET'),
+    pluggy: config.pluggy.ativo,
   };
   const out = {
     storage_backend: config.storageBackend,
@@ -150,12 +152,14 @@ async function status() {
     redirect_uri: googleRedirectUri(),
     gemini_model: config.gemini.model,
     erro_storage: null,
+    pluggy: null,
   };
   if (configurado.storage) {
     try {
       const storage = await getStorage();
       out.gmail_conectado = Boolean(await resolveRefreshToken(storage));
       if (storage.getConfig) out.ultima_ingestao = JSON.parse((await storage.getConfig('ultima_ingestao')) || 'null');
+      if (storage.getConfig && configurado.pluggy) out.pluggy = JSON.parse((await storage.getConfig('pluggy_status')) || 'null');
     } catch (err) {
       out.erro_storage = err.message;
     }
@@ -377,6 +381,15 @@ const routes = {
       const storage = await getStorage();
       const dryRun = body.dryRun === true;
       const r = await ingestNow({ dryRun, storage, log: (l) => logs.push(l) });
+      let openFinance = null;
+      if (config.pluggy.ativo) {
+        logs.push('Open Finance:');
+        openFinance = await syncPluggy({ storage, dryRun, log: (l) => logs.push(l) }).catch((e) => {
+          logs.push(`! Open Finance falhou: ${e.message}`);
+          return null;
+        });
+        if (openFinance) r.transacoes.push(...openFinance.transacoes);
+      }
       const resumo = {
         quando: new Date().toISOString(),
         simulacao: dryRun,
@@ -385,6 +398,7 @@ const routes = {
         inseridas: r.inserted.length,
         duplicadas: r.skipped,
         falhas: r.falhas.length,
+        open_finance: openFinance && { novas: openFinance.novas, saldo: openFinance.saldo },
       };
       if (!dryRun && storage.setConfig) await storage.setConfig('ultima_ingestao', JSON.stringify(resumo));
       send(res, 200, { ...resumo, logs, itens: dryRun ? r.transacoes : r.inserted, erros: r.falhas });
@@ -393,6 +407,17 @@ const routes = {
     } finally {
       ingestaoEmAndamento = false;
     }
+  },
+
+  // Importa só o Open Finance; "dias" permite buscar o histórico (a Pluggy guarda até 12 meses).
+  'POST /api/pluggy/sync': async (req, res) => {
+    if (!config.pluggy.ativo) throw new HttpError(400, 'Open Finance não configurado (PLUGGY_CLIENT_ID, PLUGGY_CLIENT_SECRET, PLUGGY_ITEM_IDS)');
+    const body = await readJson(req);
+    const dias = body.dias == null ? undefined : Number(body.dias);
+    if (dias !== undefined && !(Number.isInteger(dias) && dias >= 1 && dias <= 400)) throw new HttpError(400, 'dias deve ser 1..400');
+    const logs = [];
+    const r = await syncPluggy({ storage: await getStorage(), dryRun: body.dryRun === true, dias, log: (l) => logs.push(l) });
+    send(res, 200, { ...r, logs });
   },
 
   'GET /auth/google': async (req, res) => {
