@@ -9,6 +9,8 @@ import { chaveEstabelecimento, parseData } from './parser/normalize.js';
 import { contextoParser, createStorage } from './storage/index.js';
 import { addMeses } from './summary/forecast.js';
 import { gerarRelatorio, mesCorrente } from './summary/service.js';
+import { serieMensal } from './summary/historico.js';
+import { montarContexto, responderChat } from './chat.js';
 
 const MES_RE = /^\d{4}-\d{2}$/;
 const PUBLIC_PATHS = new Set(['/health', '/privacidade']);
@@ -109,6 +111,11 @@ function validarPlanejamento(body, categorias = CATEGORIAS) {
   };
 }
 
+async function lerSaldo(storage) {
+  if (!storage.getConfig) return { valor: null, atualizado_em: null };
+  return JSON.parse((await storage.getConfig('saldo_atual')) || 'null') ?? { valor: null, atualizado_em: null };
+}
+
 async function status() {
   const configurado = {
     gemini: hasEnv('GEMINI_API_KEY'),
@@ -176,6 +183,45 @@ const routes = {
     send(res, 200, { ok: true });
   },
 
+  'GET /api/saldo': async (req, res) => send(res, 200, await lerSaldo(await getStorage())),
+
+  'PUT /api/saldo': async (req, res) => {
+    const storage = await getStorage();
+    exigir(storage, 'setConfig');
+    const valor = Number((await readJson(req)).valor);
+    if (!Number.isFinite(valor)) throw new HttpError(400, 'valor inválido');
+    const saldo = { valor: Math.round(valor * 100) / 100, atualizado_em: new Date().toISOString() };
+    await storage.setConfig('saldo_atual', JSON.stringify(saldo));
+    send(res, 200, saldo);
+  },
+
+  'GET /api/historico': async (req, res, url) => {
+    const ate = url.searchParams.get('ate') || mesCorrente();
+    const meses = Number(url.searchParams.get('meses') || 12);
+    if (!MES_RE.test(ate)) throw new HttpError(400, 'ate deve ser YYYY-MM');
+    if (!Number.isInteger(meses) || meses < 1 || meses > 36) throw new HttpError(400, 'meses deve ser 1..36');
+    const storage = await getStorage();
+    const [transacoes, planejamento] = await Promise.all([
+      storage.listTransacoes({ desde: `${addMeses(ate, -meses)}-01` }),
+      storage.listPlanejamento(),
+    ]);
+    send(res, 200, serieMensal(transacoes, planejamento, ate, meses));
+  },
+
+  'POST /api/chat': async (req, res) => {
+    const { mensagens } = await readJson(req);
+    if (!Array.isArray(mensagens) || !mensagens.length) throw new HttpError(400, 'mensagens é obrigatório');
+    const storage = await getStorage();
+    const mesAtual = mesCorrente();
+    const [transacoes, planejamento, saldo] = await Promise.all([
+      storage.listTransacoes({ desde: `${addMeses(mesAtual, -7)}-01` }),
+      storage.listPlanejamento(),
+      lerSaldo(storage),
+    ]);
+    const contexto = montarContexto({ transacoes, planejamento, mesAtual, saldoAtual: saldo.valor ?? 0 });
+    send(res, 200, { resposta: await responderChat({ mensagens, contexto }) });
+  },
+
   'GET /api/relatorio': async (req, res, url) => {
     const mes = url.searchParams.get('mes') || mesCorrente();
     const meses = Number(url.searchParams.get('meses') || 6);
@@ -185,7 +231,7 @@ const routes = {
     const rel = await gerarRelatorio({
       mes,
       meses,
-      saldoInicial: saldoParam ? Number(saldoParam) : undefined,
+      saldoInicial: saldoParam ? Number(saldoParam) : (await lerSaldo(await getStorage())).valor ?? undefined,
       storage: await getStorage(),
     });
     send(res, 200, rel);

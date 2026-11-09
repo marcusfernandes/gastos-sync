@@ -47,6 +47,7 @@ export function parcelamentos(transacoes) {
       const restantes = t.parcelas_total - t.parcela_atual;
       const cobrada = mesCobranca(t);
       return {
+        id: t.id,
         estabelecimento: t.base,
         conta_ou_cartao: t.conta_ou_cartao,
         categoria: t.categoria,
