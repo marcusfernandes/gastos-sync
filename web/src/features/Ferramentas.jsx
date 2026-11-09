@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { FileUp, Landmark, Mail, Play, Send, TestTube2 } from 'lucide-react';
+import { Download, FileUp, Landmark, Mail, Play, Send, TestTube2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { api } from '@/lib/api';
+import { Usuarios } from '@/features/Login';
 import { useDados } from '@/lib/dados';
 import { useDialogs } from '@/lib/dialogs';
 import { brl, dataBR, dataHoraBR } from '@/lib/format';
@@ -80,6 +81,16 @@ export function Ferramentas() {
   const diasExpira = expira ? Math.ceil((new Date(expira) - Date.now()) / 864e5) : null;
   return (
     <div className="grid gap-4 lg:grid-cols-2">
+      <Usuarios />
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base"><Download className="size-4 text-primary" /> Backup</CardTitle>
+          <CardDescription>Todo domingo o bot manda no Telegram um .zip com transações, receitas e fixos, categorias e metas em CSV (abre no Excel). Dá para baixar agora também.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button asChild variant="outline" size="sm"><a href="/api/backup" download><Download /> Baixar backup agora</a></Button>
+        </CardContent>
+      </Card>
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base"><Mail className="size-4 text-primary" /> Ingestão do Gmail</CardTitle>

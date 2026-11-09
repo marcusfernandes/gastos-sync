@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BarChart3, Lightbulb, Calculator, LayoutDashboard, ListChecks, Mail, Moon, MoreVertical, RefreshCw, Sparkles, Sun, Tags, Wallet, Wrench } from 'lucide-react';
+import { BarChart3, Lightbulb, Calculator, LayoutDashboard, ListChecks, Loader2, LogOut, Mail, Moon, MoreVertical, RefreshCw, Sparkles, Sun, Tags, Wallet, Wrench } from 'lucide-react';
 import { toast } from 'sonner';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
@@ -20,6 +20,8 @@ import { Ferramentas } from '@/features/Ferramentas';
 import { Chat } from '@/features/Chat';
 import { Simulador } from '@/features/Simulador';
 import { Analises } from '@/features/Analises';
+import { Login } from '@/features/Login';
+import { api } from '@/lib/api';
 
 const ABAS = [
   ['visao', 'Visão geral', LayoutDashboard, Visao],
@@ -49,7 +51,7 @@ function Ponto({ ok, label }) {
   );
 }
 
-function Painel() {
+function Painel({ usuario, onSair }) {
   const { mes, setMes, status, recarregar, carregando } = useDados();
   const [escuro, setEscuro] = useTema();
   const [aba, setAba] = useState(() => location.hash.slice(1) || 'visao');
@@ -98,11 +100,14 @@ function Painel() {
                   <Ponto ok={status.gmail_conectado} label="Gmail" />
                 </DropdownMenuLabel>}
                 <DropdownMenuSeparator className="lg:hidden" />
+                <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Entrou como {usuario.nome}</DropdownMenuLabel>
                 <DropdownMenuItem onClick={recarregar}><RefreshCw /> Atualizar dados</DropdownMenuItem>
                 <DropdownMenuItem onClick={() => setEscuro(!escuro)}>{escuro ? <Sun /> : <Moon />} Tema {escuro ? 'claro' : 'escuro'}</DropdownMenuItem>
                 {status?.configurado.google_oauth && (
                   <DropdownMenuItem asChild><a href="/auth/google"><Mail /> {status.gmail_conectado ? 'Reconectar Gmail' : 'Conectar Gmail'}</a></DropdownMenuItem>
                 )}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={onSair}><LogOut /> Sair</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
@@ -131,13 +136,29 @@ function Painel() {
 }
 
 export default function App() {
+  const [usuario, setUsuario] = useState(undefined);
+  useEffect(() => {
+    api('/api/eu').then(setUsuario).catch(() => setUsuario(null));
+    const expirou = () => setUsuario(null);
+    addEventListener('sessao-expirada', expirou);
+    return () => removeEventListener('sessao-expirada', expirou);
+  }, []);
+  const sair = async () => {
+    await api('/api/logout', { method: 'POST' }).catch(() => {});
+    setUsuario(null);
+  };
+
   return (
     <TooltipProvider>
       <DialogsProvider>
-        <DadosProvider>
-          <Painel />
-          <Toaster richColors position="top-center" />
-        </DadosProvider>
+        {usuario === undefined && <div className="grid min-h-dvh place-items-center"><Loader2 className="size-6 animate-spin text-muted-foreground" /></div>}
+        {usuario === null && <Login onEntrar={setUsuario} />}
+        {usuario && (
+          <DadosProvider>
+            <Painel usuario={usuario} onSair={sair} />
+          </DadosProvider>
+        )}
+        <Toaster richColors position="top-center" />
       </DialogsProvider>
     </TooltipProvider>
   );

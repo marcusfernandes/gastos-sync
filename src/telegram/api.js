@@ -17,6 +17,16 @@ export function createTelegram(token, fetchImpl = fetch) {
     chamar,
     enviar: (chatId, texto, extra = {}) =>
       chamar('sendMessage', { chat_id: chatId, text: String(texto).slice(0, 4000), link_preview_options: { is_disabled: true }, ...extra }),
+    async enviarArquivo(chatId, nome, buffer, legenda = '') {
+      const form = new FormData();
+      form.append('chat_id', String(chatId));
+      if (legenda) form.append('caption', legenda.slice(0, 1000));
+      form.append('document', new Blob([buffer]), nome);
+      const res = await fetchImpl(`https://api.telegram.org/bot${token}/sendDocument`, { method: 'POST', body: form });
+      const data = await res.json().catch(() => ({}));
+      if (!data.ok) throw new Error(`Telegram sendDocument: ${data.description || res.status}`);
+      return data.result;
+    },
     digitando: (chatId) => chamar('sendChatAction', { chat_id: chatId, action: 'typing' }).catch(() => {}),
     responderCallback: (id, texto) => chamar('answerCallbackQuery', { callback_query_id: id, text: texto }).catch(() => {}),
     editarTeclado: (chatId, messageId) => chamar('editMessageReplyMarkup', { chat_id: chatId, message_id: messageId, reply_markup: { inline_keyboard: [] } }).catch(() => {}),

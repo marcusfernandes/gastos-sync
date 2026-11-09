@@ -80,7 +80,7 @@ export function Transacoes() {
             </SelectContent>
           </Select>
           <Select value={quem} onValueChange={setQuem}>
-            <SelectTrigger className="h-9 w-full sm:w-36"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="h-9 w-full sm:w-44"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="todos">Todas as pessoas</SelectItem>
               {[...pessoas, CASAL].map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}

@@ -5,6 +5,7 @@ export async function api(path, opts = {}) {
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw Object.assign(new Error(data.erro || res.statusText), { data });
+  if (res.status === 401 && data.login) dispatchEvent(new Event('sessao-expirada'));
+  if (!res.ok) throw Object.assign(new Error(data.erro || res.statusText), { data, status: res.status });
   return data;
 }

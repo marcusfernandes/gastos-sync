@@ -11,6 +11,8 @@ import { assinaturas, caixaRevisao, conferencia, orcamentoDoMes } from '../summa
 import { lerRevisados, marcarRevisados } from '../summary/revisao.js';
 import { lerMetas } from '../summary/metas.js';
 import { gerarFechamento, textoFechamento } from '../summary/fechamento.js';
+import { confereSenha } from '../auth.js';
+import { gerarBackup, nomeBackup, zipar } from '../backup.js';
 
 const brl = (n) => Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const dataBR = (d) => (d ? d.split('-').reverse().join('/') : '');
@@ -94,6 +96,12 @@ const segredoOk = (dado, esperado) => {
   const b = Buffer.from(String(esperado || ''));
   return a.length === b.length && a.length > 0 && timingSafeEqual(a, b);
 };
+
+async function senhaDeUsuario(storage, senha) {
+  if (!senha || !storage.getConfig) return false;
+  const usuarios = JSON.parse((await storage.getConfig('usuarios')) || '[]');
+  return usuarios.some((u) => confereSenha(senha, u.hash));
+}
 
 const chaveTelegram = (chatId, msgId, i = 0) => createHash('sha256').update(`telegram|${chatId}|${msgId}|${i}`).digest('hex');
 
@@ -273,7 +281,7 @@ export async function processarUpdate(update, { storage, tg, ...deps }) {
   if (/^\/start\b/.test(texto)) {
     const senha = texto.replace(/^\/start(@\w+)?\s*/, '');
     if (autorizado) return tg.enviar(chatId, `Este chat já está conectado.\n\n${AJUDA}`);
-    if (!segredoOk(senha, config.painel.senha)) return tg.enviar(chatId, 'Para conectar, mande /start seguido da senha do painel. Ex.: /start minhasenha');
+    if (!segredoOk(senha, config.painel.senha) && !(await senhaDeUsuario(storage, senha))) return tg.enviar(chatId, 'Para conectar, mande /start seguido da senha do painel. Ex.: /start minhasenha');
     const nome = [msg.from?.first_name, msg.from?.last_name].filter(Boolean).join(' ') || msg.chat.title || String(chatId);
     await storage.setConfig('telegram_chats', JSON.stringify({ chats: [...chats, { id: chatId, nome, desde: new Date().toISOString() }] }));
     return tg.enviar(chatId, `Conectado, ${nome}! Você vai receber aqui os avisos de contas e o resumo semanal.\n\n${AJUDA}`);
@@ -370,7 +378,7 @@ async function novosParaRevisar(storage, mes, estado) {
 const horaBR = (agora) => Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', hour: 'numeric', hourCycle: 'h23' }).format(agora));
 const diaSemanaBR = (agora) => new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', weekday: 'short' }).format(agora);
 
-// Chamado a cada ingestão (3 em 3 horas). Manda no máximo um aviso de contas por dia e o resumo semanal às segundas.
+// Chamado a cada ingestão (3 em 3 horas). Manda no máximo um aviso de contas por dia, o resumo semanal às segundas e o backup aos domingos.
 export async function enviarAlertas({ storage, tg, agora = new Date(), hora = config.telegram.horaAlertas, log = console.log }) {
   const chats = await chatsAutorizados(storage);
   if (!chats.length || horaBR(agora) < hora) return { enviados: 0 };
@@ -410,8 +418,20 @@ export async function enviarAlertas({ storage, tg, agora = new Date(), hora = co
     mensagens.push(await textoSemana(storage, hoje));
   }
 
+  let backup = null;
+  if (diaSemanaBR(agora) === 'Sun' && estado.backup !== hoje && tg.enviarArquivo) {
+    estado.backup = hoje;
+    backup = zipar(await gerarBackup(storage));
+  }
+
   await storage.setConfig('telegram_alertas', JSON.stringify(estado));
   let enviados = 0;
+  if (backup) {
+    for (const chat of chats) {
+      await tg.enviarArquivo(chat.id, nomeBackup(hoje), backup, 'Backup semanal do gastos-sync (transações, receitas/fixos, categorias e metas em CSV). Guarde este arquivo.')
+        .then(() => enviados++).catch((e) => log(`! Telegram backup ${chat.nome}: ${e.message}`));
+    }
+  }
   for (const chat of chats) {
     for (const m of mensagens) {
       await tg.enviar(chat.id, m).then(() => enviados++).catch((e) => log(`! Telegram ${chat.nome}: ${e.message}`));

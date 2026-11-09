@@ -1,5 +1,5 @@
 import http from 'node:http';
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { CATEGORIAS, config, googleRedirectUri, publicUrl } from './config.js';
 import { createOAuthClient, GMAIL_SCOPES, htmlToText, resolveRefreshToken } from './gmail/client.js';
@@ -19,17 +19,18 @@ import { lerMetas, resumoMetas, validarMetas } from './summary/metas.js';
 import { gerarFechamento } from './summary/fechamento.js';
 import { CASAL, gastosPorPessoa, pessoasDe } from './summary/pessoas.js';
 import { syncPluggy } from './pluggy/sync.js';
+import { gerarBackup, nomeBackup, zipar } from './backup.js';
+import { createAuth, createLimitador, normalizar } from './auth.js';
 import { createTelegram, segredoWebhook } from './telegram/api.js';
 import { chatsAutorizados, enviarAlertas, processarUpdate } from './telegram/bot.js';
 
 const telegram = config.telegram.ativo ? createTelegram(config.telegram.token) : null;
 
 const MES_RE = /^\d{4}-\d{2}$/;
-const PUBLIC_PATHS = new Set(['/health', '/privacidade', '/telegram/webhook']);
 const DIST = new URL('../web/dist/', import.meta.url);
 const painelHtml = await readFile(new URL('index.html', DIST), 'utf8')
   .catch(() => readFile(new URL('../public/index.html', import.meta.url), 'utf8'));
-const MIME = { '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.png': 'image/png', '.ico': 'image/x-icon' };
+const MIME = { '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json', '.json': 'application/json' };
 
 async function sendAsset(res, pathname) {
   const nome = pathname.replace(/^\/+/, '');
@@ -76,14 +77,25 @@ function sendHtml(res, status, html) {
   res.end(html);
 }
 
-function autorizado(req) {
-  const senha = config.painel.senha;
-  if (!senha) return !publicUrl(); // sem senha, só libera rodando localmente
-  const [scheme, encoded] = (req.headers.authorization || '').split(' ');
-  if (scheme !== 'Basic' || !encoded) return false;
-  const informada = Buffer.from(Buffer.from(encoded, 'base64').toString('utf8').split(':').slice(1).join(':'));
-  const esperada = Buffer.from(senha);
-  return informada.length === esperada.length && timingSafeEqual(informada, esperada);
+const auth = createAuth({
+  senhaMestre: config.painel.senha,
+  nomeMestre: process.env.PAINEL_USUARIO || 'Marcão',
+  segredo: process.env.SESSAO_SEGREDO,
+  storage: getStorage,
+});
+const limitador = createLimitador();
+const ROTAS_PROTEGIDAS = /^\/(api\/|auth\/google$|oauth2callback$)/;
+const ROTAS_ABERTAS = new Set(['POST /api/login', 'POST /api/logout']);
+const ipDe = (req) => String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+const cookieSeguro = () => String(publicUrl() || '').startsWith('https://');
+
+async function usuarioDe(req) {
+  if (!config.painel.senha) return publicUrl() ? null : { nome: auth.nomeMestre, admin: true }; // sem senha, só libera rodando localmente
+  return auth.identificar(req);
+}
+
+function exigirAdmin(req) {
+  if (!req.usuario?.admin) throw new HttpError(403, `Só ${auth.nomeMestre} pode fazer isso`);
 }
 
 async function readJson(req) {
@@ -194,6 +206,47 @@ async function status() {
 
 const routes = {
   'GET /': async (req, res) => sendHtml(res, 200, painelHtml),
+  'POST /api/login': async (req, res) => {
+    const ip = ipDe(req);
+    if (limitador.bloqueado(ip)) throw new HttpError(429, 'Muitas tentativas. Tente de novo em 15 minutos.');
+    if (!config.painel.senha) throw new HttpError(503, 'Defina a variável PAINEL_SENHA para usar o painel.');
+    const { usuario, senha } = await readJson(req);
+    const r = await auth.entrar(usuario, senha);
+    if (!r) {
+      limitador.falhou(ip);
+      throw new HttpError(401, 'Usuário ou senha incorretos');
+    }
+    limitador.limpar(ip);
+    res.setHeader('set-cookie', auth.cookie(r.token, { seguro: cookieSeguro() }));
+    send(res, 200, r.usuario);
+  },
+  'POST /api/logout': async (req, res) => {
+    res.setHeader('set-cookie', auth.cookie('', { seguro: cookieSeguro() }));
+    send(res, 200, { ok: true });
+  },
+  'GET /api/backup': async (req, res) => {
+    const zip = zipar(await gerarBackup(await getStorage()));
+    res.writeHead(200, {
+      'content-type': 'application/zip',
+      'content-disposition': `attachment; filename="${nomeBackup(new Date().toLocaleDateString('sv-SE', { timeZone: 'America/Sao_Paulo' }))}"`,
+      'cache-control': 'no-store',
+    });
+    res.end(zip);
+  },
+  'GET /api/eu': async (req, res) => send(res, 200, req.usuario),
+  'GET /api/usuarios': async (req, res) => send(res, 200, await auth.listar()),
+  'PUT /api/usuarios': async (req, res) => {
+    const { nome, senha } = await readJson(req);
+    const proprio = normalizar(nome) === normalizar(req.usuario.nome);
+    if (!proprio) exigirAdmin(req);
+    try { await auth.definirSenha(nome, senha); } catch (e) { throw new HttpError(400, e.message); }
+    send(res, 200, await auth.listar());
+  },
+  'DELETE /api/usuarios': async (req, res, url) => {
+    exigirAdmin(req);
+    await auth.remover(url.searchParams.get('nome'));
+    send(res, 200, await auth.listar());
+  },
   'GET /health': async (req, res) => send(res, 200, { ok: true }),
   'GET /privacidade': async (req, res) => sendHtml(res, 200, privacidadeHtml),
   'GET /api/status': async (req, res) => send(res, 200, await status()),
@@ -646,10 +699,16 @@ const routes = {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   try {
-    if (!PUBLIC_PATHS.has(url.pathname) && !autorizado(req)) {
-      if (!config.painel.senha) return sendHtml(res, 503, 'Defina a variável PAINEL_SENHA para usar o painel.');
-      res.writeHead(401, { 'www-authenticate': 'Basic realm="gastos-sync", charset="UTF-8"' });
-      return res.end('Autenticação necessária');
+    const rota = `${req.method} ${url.pathname}`;
+    if (ROTAS_PROTEGIDAS.test(url.pathname) && !ROTAS_ABERTAS.has(rota)) {
+      req.usuario = await usuarioDe(req);
+      if (!req.usuario) {
+        if (!url.pathname.startsWith('/api/')) {
+          res.writeHead(302, { location: '/' });
+          return res.end();
+        }
+        return send(res, 401, { erro: 'Faça login para continuar', login: true });
+      }
     }
     const handler = routes[`${req.method} ${url.pathname}`];
     if (!handler) {
