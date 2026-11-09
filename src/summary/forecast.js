@@ -73,10 +73,12 @@ function porCategoria(items) {
   return Object.fromEntries(Object.entries(out).sort((a, b) => b[1] - a[1]));
 }
 
+// Compras de cartão contam no mês em que a fatura vence, como as faturas sem detalhe.
+const mesPago = (t) => mesDe(t.vencimento || t.data);
+
 export function resumoMensal(transacoes, planejamento, mes) {
-  const doMes = transacoes.filter((t) => mesDe(t.data) === mes);
-  const gastos = doMes.filter((t) => GASTO_TIPOS.has(t.tipo));
-  const recebidos = doMes.filter((t) => t.tipo === 'pix_recebido');
+  const gastos = transacoes.filter((t) => GASTO_TIPOS.has(t.tipo) && mesPago(t) === mes);
+  const recebidos = transacoes.filter((t) => t.tipo === 'pix_recebido' && mesDe(t.data) === mes);
   const faturas = transacoes.filter((t) => t.tipo === 'fatura' && mesDe(t.vencimento || t.data) === mes);
 
   const plan = planejamento.filter((p) => planejadoNoMes(p, mes));
@@ -111,8 +113,6 @@ export function resumoMensal(transacoes, planejamento, mes) {
   };
 }
 
-// Compras de cartão contam no mês em que a fatura vence, como as faturas sem detalhe.
-const mesPago = (t) => mesDe(t.vencimento || t.data);
 
 // Média mensal de gastos variáveis nos últimos N meses fechados, excluindo
 // categorias cobertas por despesas fixas planejadas (evita contar o aluguel duas vezes).

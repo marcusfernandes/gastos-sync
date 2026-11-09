@@ -25,7 +25,7 @@ export function Visao() {
     <div className={cn('grid gap-4 transition-opacity', carregando && 'opacity-60')}>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <Kpi titulo="Entradas" valor={brl(r.entradas.cadastradas)} icone={ArrowUpCircle} tom="verde" detalhe={r.entradas.recebidas_pix ? `+ ${brl(r.entradas.recebidas_pix)} em Pix` : 'salários e entradas'} />
-        <Kpi titulo="Gastos registrados" valor={brl(r.gastos.registrados)} icone={ArrowDownCircle} tom="vermelho" detalhe="compras, Pix e débitos" />
+        <Kpi titulo="Gastos registrados" valor={brl(r.gastos.registrados)} icone={ArrowDownCircle} tom="vermelho" detalhe="Pix, débitos e compras (cartão no mês da fatura)" />
         <Kpi titulo="Fixos planejados" valor={brl(r.gastos.fixos_planejados)} icone={CalendarClock} tom="ambar" detalhe={r.gastos.pontuais_planejados ? `+ ${brl(r.gastos.pontuais_planejados)} pontuais` : 'contas do mês'} />
         <Kpi titulo="Faturas sem detalhe" valor={brl(r.gastos.faturas_sem_detalhe || 0)} icone={CreditCard} tom="azul" detalhe="cartões sem compras lidas" />
         <Kpi titulo="Saídas do mês" valor={brl(saidasMes)} icone={Receipt} tom="vermelho" detalhe="o maior entre registrado e planejado" />
